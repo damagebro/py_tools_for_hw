@@ -1,0 +1,31 @@
+usage: `cd ./autogen_reg;  python ./src/autogen_reg.py`
+或双击autogen_reg.exe, 必须有<base_reg.txt>文件， 和<base_reg.txt>指定目录下的<fn_indoc>文件；
+
+说明：
+>>>
+1. 整个程序配置文件为base_reg.txt， 可指定[FILE],[SPEC],[ATTR]三类属性，
+* [FILE]
+work_dir: 所有生成的文件根目录，
+fn_indoc：输入寄存器配置相关的word文件；//------<必须>-----------
+top_name：rtl模块顶层名
+-生成的文件目录结构如下：
+|<work_dir>/
+|          |rtl/ #生成的rtl文件
+|              |<top_name>_csr_slave/
+|                                   |<top_name>_csr_slave.v,<top_name>csr_slave_reg.v
+|          |doc/ #重新整理fn_indoc，详细描述寄存器文档；
+|              |<top_name>_register.docx,<top_name>_register.xml
+|          |cpp/ #给rm模型生成c++需要的寄存器配置内容；
+|              |<top_name>_register.h
+|          |sv/ #给验证组生成的sv需要的寄存器配置内容；
+|             |<top_name>_register.pkg
+
+[SPEC]
+author： 使用者名字(显示在生成的rtl文件头部)
+email: 使用者邮箱
+
+[ATTR]
+slv_register: 当有csr_slave时，传递给slave的csr总线是否用寄存器打一拍(如果很多级csr级联,可在中间级指定该配置为yes,改善时序);
+reg_bitwidth: 每个寄存器位宽，通常为32bit;(2020/05/05, 32bit完整测试，其他位宽待测试)
+reg_addrbase: 寄存器在系统统一编址时，对应的地址偏移； (1)对于生成csr的rtl文件来说，该配置无效，在ahb2csr/apb2csr的转换模块中，会减去系统偏移；(2)对于生成csr的cpp文件，给rm使用时，可能会用到该配置；
+>>>

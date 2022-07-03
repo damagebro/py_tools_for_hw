@@ -1,0 +1,28 @@
+[FILE]
+work_dir = ./bin/
+fn_indoc = ./cu_register.docx
+top_name = cu
+#input : fn_indoc
+#output:
+#|<work_dir>/
+#|          |rtl/
+#|              |<top_name>_csr_slave/
+#|                                   |<top_name>_csr_slave.v,<top_name>csr_slave_reg.v
+#|          |doc/
+#|              |<top_name>_register.docx,<top_name>_register.xml
+#|          |cpp/
+#|              |<top_name>_register.h
+#|          |sv/
+#|             |<top_name>_register.pkg
+
+[SPEC]
+author = <someone>
+email  = <someone>@sensetime.com
+
+[ATTR]
+slv_register = no
+reg_bitwidth = 32
+reg_addrbase = 0x0
+#[ATTR] comment-----
+#slv_register: yes or no,  yes: slv register out(delay 1cycle), no: slv direct out(delay 0cycle)
+#reg_addrbase: system unify address; here don't be used, //it's used in ahb2csr/apb2csr module, to minus system addr offset;
