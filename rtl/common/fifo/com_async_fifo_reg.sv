@@ -9,7 +9,7 @@
 *  -when wr_full, the storeged data tol_num=(DEPTH+1);
 *
 *  Modify:
-*  -2020/09/16, modify by ty:
+*  -2020/09/16, modify by dmg:
 *   data register out, to isolated datapath in dst_clk domain, from afifo.arc_mem to rc_out_data;
 *
 ******************************************************************************/

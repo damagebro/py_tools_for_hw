@@ -1,0 +1,10 @@
+*使用方式
+python ./src/gen_rtl_inst.py <rtl_filename>    #python3
+./run.sh <rtl_filename>
+
+*输出结果
+./inst.v    #例化后的"端口连接+端口信号声明"生成在该文件中， 从这里复制到需集成的rtl代码；
+
+
+*示例
+python ./src/gen_rtl_inst.py ./test/test.sv

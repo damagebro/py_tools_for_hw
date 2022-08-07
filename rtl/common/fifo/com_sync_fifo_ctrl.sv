@@ -8,8 +8,6 @@
 *  -
 *
 *  Modify:
-*  -2020/09/21, modify by ty:
-*   when rd_empty, rd_data=0; to prevent x_state propagate
 *
 ******************************************************************************/
 
