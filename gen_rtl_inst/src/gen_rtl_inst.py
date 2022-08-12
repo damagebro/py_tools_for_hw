@@ -135,7 +135,7 @@ def get_parm_list( li_str_module ):  #[parm_name, default_value, b_independent_f
             left_val = li[0].split()[-1].strip()
             righ_val = li[1].split()[0].strip()
         else:
-            left_val = s.split()[0]
+            left_val = s.split()[-1]
             righ_val = '<must_be_specifed>'
         b_independent_flag = 1
         for li in li_parm:
