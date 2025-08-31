@@ -282,13 +282,13 @@ def get_rtl_inst_str(str_module_name, li_parm, li_port):
             str_comma = ','
             if( b_last_flag ):
                 str_comma = ' '
-            str_wr+= '<indent>.{:20s} ( {:20s}){} //{}\n'.format( parm_name, parm_name,str_comma, str_value )
+            str_wr+= '<indent>.{:30s} ( {:30s}){} //{}\n'.format( parm_name, parm_name,str_comma, str_value )
         str_tmp = ''
         for i in range(len(li_parm_dependent)):
             li = li_parm_dependent[i]
             parm_name = li[0]
             str_value = li[1]
-            str_tmp+= '<indent>//.{:20s} ( {:20s}){} //{}\n'.format( parm_name, parm_name,',', str_value )
+            str_tmp+= '<indent>//.{:30s} ( {:30s}){} //{}\n'.format( parm_name, parm_name,',', str_value )
         # print( str_tmp )
         str_wr+= str_wr.split('\n')[-1]
         str_wr+= ')u_{mod_name}(\n'.format( mod_name=str_module_name )
