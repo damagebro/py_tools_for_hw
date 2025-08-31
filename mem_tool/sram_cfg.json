@@ -1,0 +1,41 @@
+{
+    "common_opt" : {
+        "gen_sram_shell"    : 0,
+        "gen_sram_list"     : 0,
+        "gen_sram_excel"    : 0,
+        "gen_sram_instance" : 1,
+
+        "subsys_prefix" : "cpu",
+        "excel_filename" : "project_cpu_20250730_memory_require.xlsx",
+        "env_var" : {
+            "PROJ_ROOT" : ""
+        },
+        "copy_path" : {
+            "sram_excel_path" : "",
+            "sram_shell_path" : ""
+        }
+    },
+    "gen_sram_list_by_runsim" : {
+        "top_module_name" : "cpu_subsys",
+        "rtl_filelist" : [
+            "xx.sv",
+            "-v xx.sv",
+            "-f xx.f"
+        ]
+    },
+    "gen_sram_excel" : {
+        "default_ram_wr_clk_MHz" : 1500,
+        "default_ram_rd_clk_MHz" : 1000
+    },
+
+    "comment" : [
+        "gen_sram_shell/gen_sram_list/gen_sram_excel/gen_sram_instance/每个开关都可以单独运行, 确保以下每个开关对应的输入文件存在即可",
+
+        "gen_sram_shell   =1, 输出./bin/<subsys_prefix>_sram_shell.sv; 产生带subsys前缀的sram_shell rtl文件, 此时的xxx_sram_shell未集成sram_wrapper, 只用来跑仿真.",
+        "gen_sram_list    =1, 输入top_module_name+rtl_filelist,  输出./bin/xxram.lst; 通过运行vcs仿真, 打印所有sram形状对应的parameter,  rtl_filelist最好是绝对路径, 也可以带环境变量{PROJ_ROOT}, PROJ_ROOT名称可自行修改",
+        "gen_sram_excel   =1, 输入./bin/xxram.lst, 输出./bin/{excel_filename}; excel格式方便前后端交互。 excel中有指定memory_compiler的ppa策略, 有sram时钟频率等, 有些需要再'手动检查'一遍。对于时钟频率, 默认用本json文件指定的频率, 若读写时钟频率相同只使用'default_ram_wr_clk'; 另外, 若sram_shell的MEM_USER参数非0, 优先用MEM_USER指定的频率, MEM_USER指定时钟频率的方式每个项目统一约定, 且需修改python脚本。",
+        "gen_sram_instance=1, 输入./bin/{excel_filename}, 输出./bin/<subsys_prefix>_sram_shell.sv; 在sram_shell中集成所有sram形状对应的sram_wrapper",
+
+        "sram_wrapper命名规则: {subsys_prefix}_{sram_type}_{depth}X{width}[X{strobe_w}][_{suffix}]"
+    ]
+}
