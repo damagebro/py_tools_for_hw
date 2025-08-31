@@ -44,8 +44,8 @@ def del_blk_cmt( li_str ):
 
     return li_ret
 def del_all_cmt( li_str ):
-    li_ret = del_blk_cmt( li_str )
-    li_ret = del_line_cmt( li_ret ) # 块注释 比行注释 优先级更高
+    li_ret = del_line_cmt( li_str ) # 行注释 比块注释 优先级更高
+    li_ret = del_blk_cmt( li_ret )
 
     return li_ret
 
@@ -75,8 +75,8 @@ def parse_port_def( s ):
         str_io_direction = 'o'
     elif( str_find(s,'inout') ):
         str_io_direction = 'io'
-    elif( str_re_find(s,'\w+\.\w+(?:.|\n)*') ):
-        str_io_direction = 'if'
+    # elif( str_re_find(s,'\w+\.\w+(?:.|\n)*') ):
+    #     str_io_direction = 'if'
 
     return str_io_direction, str_bit_width
 def get_parm_list( li_str_module ):  #[parm_name, default_value, b_independent_flag]
@@ -135,7 +135,7 @@ def get_parm_list( li_str_module ):  #[parm_name, default_value, b_independent_f
             left_val = li[0].split()[-1].strip()
             righ_val = li[1].split()[0].strip()
         else:
-            left_val = s.split()[0]
+            left_val = s.split()[-1]
             righ_val = '<must_be_specifed>'
         b_independent_flag = 1
         for li in li_parm:
@@ -282,18 +282,18 @@ def get_rtl_inst_str(str_module_name, li_parm, li_port):
             str_comma = ','
             if( b_last_flag ):
                 str_comma = ' '
-            str_wr+= '<indent>.{:20s} ( {:20s}){} //{}\n'.format( parm_name, parm_name,str_comma, str_value )
+            str_wr+= '<indent>.{:30s} ( {:30s}){} //{}\n'.format( parm_name, parm_name,str_comma, str_value )
         str_tmp = ''
         for i in range(len(li_parm_dependent)):
             li = li_parm_dependent[i]
             parm_name = li[0]
             str_value = li[1]
-            str_tmp+= '<indent>//.{:20s} ( {:20s}){} //{}\n'.format( parm_name, parm_name,',', str_value )
+            str_tmp+= '<indent>//.{:30s} ( {:30s}){} //{}\n'.format( parm_name, parm_name,',', str_value )
         # print( str_tmp )
         str_wr+= str_wr.split('\n')[-1]
-        str_wr+= ')u_{mod_name}\n'.format( mod_name=str_module_name )
+        str_wr+= ')u_{mod_name}(\n'.format( mod_name=str_module_name )
     else:
-        str_wr+= '{mod_name} u_{mod_name}\n'.format( mod_name=str_module_name )
+        str_wr+= '{mod_name} u_{mod_name}(\n'.format( mod_name=str_module_name )
 
     #port_list inst
     for i in range(len(li_port)):
