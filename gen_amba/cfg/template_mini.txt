@@ -1,4 +1,4 @@
-[axi4_write]
+[axi4_write:M]
 GLOBAL: input  logic                      aclk
 GLOBAL: input  logic                      aresetn
 output wire [ID_W-1:0]           awid

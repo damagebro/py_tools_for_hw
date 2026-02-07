@@ -3,9 +3,9 @@
   "template_file": "template_mini.txt",
   "instances": [
     {
-      "prefix": ["s00_axi", "s01_axi", "s02_axi"],
+      "prefix": ["s00_axi", "s01_axi"],
       "protocol": "axi4_write",
-      "mode": "master",
+      "mode": "s_m_alt",
       "params": {
         "ADDR_WIDTH": 32,
         "DATA_WIDTH": 32,
