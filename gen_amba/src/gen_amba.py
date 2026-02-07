@@ -3,7 +3,7 @@ import json
 import re
 from pathlib import Path
 
-# 正则：匹配信号行，增强对 logic/reg/wire 等声明的支持
+# 正则：匹配信号行，支持 GLOBAL、方向、类型、位宽和信号名
 REGEX_SIGNAL = re.compile(r'^\s*(GLOBAL:)?\s*(input|output)\s+(\w+)\s+(?:\[(.*?)\])?\s*(\w+)')
 
 def get_project_root():
@@ -11,7 +11,7 @@ def get_project_root():
     return Path(__file__).resolve().parent.parent
 
 def calc_width(width_raw, params):
-    """参数替换与计算规则"""
+    """参数计算规则：匹配则转数值，不匹配则透传"""
     if not width_raw: return ""
     expr = width_raw
     for k, v in params.items():
@@ -21,16 +21,17 @@ def calc_width(width_raw, params):
     res = []
     for p in parts:
         try:
-            val = int(eval(p))
-            res.append(str(val))
+            res.append(str(int(eval(p))))
         except:
             res.append(p)
     return f"[{':'.join(res)}]"
 
-def load_template(filename):
-    """读取模板内容"""
-    path = get_project_root() / "cfg" / filename
-    if not path.exists(): return {}
+def load_template(tpl_filename):
+    """根据前台指定的文件名读取模板"""
+    path = get_project_root() / "cfg" / tpl_filename
+    if not path.exists():
+        raise FileNotFoundError(f"Template file not found: {path}")
+
     content = path.read_text(encoding='utf-8')
     sections = {}
     current_sec = None
@@ -43,10 +44,14 @@ def load_template(filename):
             sections[current_sec].append(line)
     return sections
 
-def generate_rtl(tpl_name, cfg_name):
-    templates = load_template(tpl_name)
+def generate_rtl(cfg_name):
+    # 1. 先读前台配置
     cfg_path = get_project_root() / cfg_name
     config = json.loads(cfg_path.read_text(encoding='utf-8'))
+
+    # 2. 获取模板文件名，默认为 template.txt
+    tpl_filename = config.get("template_file", "template.txt")
+    templates = load_template(tpl_filename)
 
     raw_port_data = []
     seen_globals = set()
@@ -75,6 +80,7 @@ def generate_rtl(tpl_name, cfg_name):
                     seen_globals.add(sig_key)
                 continue
 
+            # 自动翻转 Master/Slave 方向
             final_dir = 'output' if (mode == 'slave' and raw_dir == 'input') or (mode == 'master' and raw_dir == 'output') else 'input'
             raw_port_data.append({
                 "type": "port", "dir": final_dir, "decl": raw_type,
@@ -103,11 +109,9 @@ def generate_rtl(tpl_name, cfg_name):
 
 if __name__ == "__main__":
     try:
-        verilog = generate_rtl('template.txt', 'config.json')
+        verilog = generate_rtl('config.json')
         out_dir = get_project_root() / "out"
         out_dir.mkdir(exist_ok=True)
-
-        # 核心修改：后缀改为 .sv
         output_path = out_dir / "amba_top.sv"
         output_path.write_text(verilog, encoding='utf-8')
         print(f"Generated successfully in: {output_path}")
