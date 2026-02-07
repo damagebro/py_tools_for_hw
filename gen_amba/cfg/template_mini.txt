@@ -29,11 +29,11 @@ output wire                      bready
 [apb]
 GLOBAL: input  wire                      pclk
 GLOBAL: input  wire                      presetn
-output wire [ADDR_WIDTH-1:0]     paddr
-output wire [2:0]                pprot
-output wire                      psel
-output wire                      penable
-output wire                      pwrite
-output wire [DATA_WIDTH-1:0]     pwdata
-input  wire [DATA_WIDTH-1:0]     prdata
-input  wire                      pready
+output wire [ADDR_WIDTH-1:0]     paddr      ,
+output wire [2:0]                pprot      ,
+output wire                      psel       ,
+output wire                      penable    ,
+output wire                      pwrite     ,
+output wire [DATA_WIDTH-1:0]     pwdata     ,
+input  wire [DATA_WIDTH-1:0]     prdata     ,
+input  wire                      pready     ,
