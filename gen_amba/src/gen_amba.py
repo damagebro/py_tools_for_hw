@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import re
+import argparse
 from pathlib import Path
 
 # 正则捕获：1.GLOBAL 2.方向 3.类型 4.位宽 5.信号名 6.名后空格 7.逗号
@@ -45,7 +46,11 @@ def load_template(tpl_filename):
     return sections
 
 def generate_rtl(cfg_name):
-    cfg_path = get_project_root() / cfg_name
+    # 如果 cfg_name 是绝对路径则直接使用，否则相对于项目根目录寻找
+    cfg_path = Path(cfg_name) if Path(cfg_name).is_absolute() else get_project_root() / cfg_name
+    if not cfg_path.exists():
+        raise FileNotFoundError(f"Config file not found: {cfg_path}")
+
     config = json.loads(cfg_path.read_text(encoding='utf-8'))
     tpl_filename = config.get("template_file", "template.txt")
     templates = load_template(tpl_filename)
@@ -102,12 +107,11 @@ def generate_rtl(cfg_name):
                         "tpl_space_len": len(spaces)
                     })
 
-    # --- 像素级对齐逻辑：修复行尾对齐 ---
+    # --- 像素级对齐逻辑 ---
     max_d_len = max([len(i["decl"]) for i in raw_port_data if i["type"] == "port"] or [0])
     max_w_len = max([len(i["width"]) for i in raw_port_data if i["type"] == "port"] or [0])
 
-    # 核心算法：找到“信号名 + 模板原始空格”后的最大列位置
-    # 这样可以处理 GLOBAL 信号（短名+长空格）和 接口信号（长名+短空格）的混合对齐
+    # 核心：计算全局最大列基准，确保逗号绝对垂直对齐
     max_name_end_col = max([(len(i["name"]) + i["tpl_space_len"]) for i in raw_port_data if i["type"] == "port"] or [0])
 
     ports_idx = [idx for idx, x in enumerate(raw_port_data) if x["type"] == "port"]
@@ -119,15 +123,14 @@ def generate_rtl(cfg_name):
             formatted.append(f"    {item['content']}")
         else:
             comma = "" if i == last_idx else ","
-            # 1. 前部：方向 + 类型 + 位宽 (带1个空格)
+            # 前部对齐 (wire [] 间距收紧)
             w_field = f" {item['width']}" if item['width'] else ""
             line_prefix = f"    {item['dir']:<6} {item['decl']:<{max_d_len}}{w_field:<{max_w_len+1}}"
 
-            # 2. 中缝：固定 10 个空格
+            # 中缝：10个空格
             middle_gap = " " * 10
 
-            # 3. 尾部：信号名 + 动态对齐空格，使逗号垂直对齐
-            # 计算该行需要的填充空格，使其总长度达到 max_name_end_col
+            # 尾部对齐：确保逗号垂直
             padding_len = max_name_end_col - len(item["name"])
             name_and_padding = f"{item['name']}{' ' * padding_len}"
 
@@ -136,11 +139,17 @@ def generate_rtl(cfg_name):
     return f"module {config['module_name']} (\n" + "\n".join(formatted) + "\n);\n\nendmodule"
 
 if __name__ == "__main__":
+    # 命令行参数配置
+    parser = argparse.ArgumentParser(description='AMBA RTL Generator')
+    parser.add_argument('config_file', nargs='?', default='config.json',
+                        help='Path to the config file (default: config.json)')
+    args = parser.parse_args()
+
     try:
-        verilog_content = generate_rtl('config.json')
+        verilog_content = generate_rtl(args.config_file)
         output_file = get_project_root() / "out" / "amba_top.sv"
         output_file.parent.mkdir(exist_ok=True)
         output_file.write_text(verilog_content, encoding='utf-8')
-        print(f"Successfully generated aligned SV: {output_file}")
+        print(f"Successfully generated RTL from '{args.config_file}' -> {output_file}")
     except Exception as e:
         print(f"Error: {e}")
