@@ -22,10 +22,6 @@ def calc_width(width_raw, params):
     return f"[{':'.join(res)}]"
 
 def get_dynamic_prefix(pfx, is_flipped):
-    """
-    处理双下划线翻转逻辑：
-    例如 pfx="cpu__sbf", is_flipped=True 时返回 "sbf__cpu"
-    """
     if "__" in pfx and is_flipped:
         parts = pfx.split("__")
         return "__".join(reversed(parts))
@@ -43,7 +39,7 @@ def load_template(tpl_filename):
             raw_tag = line_strip[1:-1]
             label, role = raw_tag.split(':') if ':' in raw_tag else (raw_tag, None)
             current_label = label
-            sections[current_label] = {"role": role, "lines": []}
+            sections[current_label] = {"role_tag": role, "lines": []}
         elif current_label and line_strip and not line_strip.startswith('//'):
             sections[current_label]["lines"].append(line)
     return sections
@@ -67,7 +63,6 @@ def generate_rtl(cfg_name):
         tpl_info = templates[label]
 
         for pfx in prefixes:
-            # 确定交替模式列表
             if base_mode == 'm_s_alt':
                 modes_to_gen = [('master', False), ('slave', True)]
             elif base_mode == 's_m_alt':
@@ -76,7 +71,6 @@ def generate_rtl(cfg_name):
                 modes_to_gen = [(base_mode, False)]
 
             for curr_mode, is_flipped in modes_to_gen:
-                # 处理动态前缀翻转
                 active_pfx = get_dynamic_prefix(pfx, is_flipped).lower()
                 raw_port_data.append({"type": "comment", "content": f"// --- {active_pfx} ({label.upper()} {curr_mode.upper()}) ---"})
 
@@ -89,27 +83,33 @@ def generate_rtl(cfg_name):
                         if f"{label}_{suffix.lower()}" not in seen_globals:
                             raw_port_data.append({
                                 "type": "port", "dir": raw_dir, "decl": raw_type,
-                                "width": calc_width(raw_width, params), "name": suffix.lower(), "space_len": len(spaces)
+                                "width": calc_width(raw_width, params), "name": suffix.lower(),
+                                "tpl_space_len": len(spaces)
                             })
                             seen_globals.add(f"{label}_{suffix.lower()}")
                         continue
 
-                    # 方向判定逻辑
-                    if tpl_info["role"] and tpl_info["role"] != curr_mode[0].upper():
+                    role_defined = tpl_info["role_tag"]
+                    if role_defined and role_defined != curr_mode[0].upper():
                         final_dir = 'output' if raw_dir == 'input' else 'input'
                     else:
-                        final_dir = ('output' if raw_dir == 'input' else 'input') if (curr_mode == 'slave' and not tpl_info["role"]) else raw_dir
+                        final_dir = ('output' if raw_dir == 'input' else 'input') if (curr_mode == 'slave' and not role_defined) else raw_dir
 
                     raw_port_data.append({
                         "type": "port", "dir": final_dir, "decl": raw_type,
                         "width": calc_width(raw_width, params),
-                        "name": f"{active_pfx}_{suffix.lower().lstrip('_')}", "space_len": len(spaces)
+                        "name": f"{active_pfx}_{suffix.lower().lstrip('_')}",
+                        "tpl_space_len": len(spaces)
                     })
 
-    # 对齐逻辑
-    max_w_len = max([len(i["width"]) for i in raw_port_data if i["type"] == "port"] or [0])
+    # --- 像素级对齐逻辑：修复行尾对齐 ---
     max_d_len = max([len(i["decl"]) for i in raw_port_data if i["type"] == "port"] or [0])
-    max_n_len = max([len(i["name"]) for i in raw_port_data if i["type"] == "port"] or [0])
+    max_w_len = max([len(i["width"]) for i in raw_port_data if i["type"] == "port"] or [0])
+
+    # 核心算法：找到“信号名 + 模板原始空格”后的最大列位置
+    # 这样可以处理 GLOBAL 信号（短名+长空格）和 接口信号（长名+短空格）的混合对齐
+    max_name_end_col = max([(len(i["name"]) + i["tpl_space_len"]) for i in raw_port_data if i["type"] == "port"] or [0])
+
     ports_idx = [idx for idx, x in enumerate(raw_port_data) if x["type"] == "port"]
     last_idx = ports_idx[-1] if ports_idx else -1
 
@@ -119,9 +119,19 @@ def generate_rtl(cfg_name):
             formatted.append(f"    {item['content']}")
         else:
             comma = "" if i == last_idx else ","
-            w_str = f" {item['width']}" if item['width'] else ""
-            line = f"    {item['dir']:<6} {item['decl']:<{max_d_len}} {w_str:<{max_w_len+1}}{item['name']:<{max_n_len}}{' '*item['space_len']}{comma}"
-            formatted.append(line)
+            # 1. 前部：方向 + 类型 + 位宽 (带1个空格)
+            w_field = f" {item['width']}" if item['width'] else ""
+            line_prefix = f"    {item['dir']:<6} {item['decl']:<{max_d_len}}{w_field:<{max_w_len+1}}"
+
+            # 2. 中缝：固定 10 个空格
+            middle_gap = " " * 10
+
+            # 3. 尾部：信号名 + 动态对齐空格，使逗号垂直对齐
+            # 计算该行需要的填充空格，使其总长度达到 max_name_end_col
+            padding_len = max_name_end_col - len(item["name"])
+            name_and_padding = f"{item['name']}{' ' * padding_len}"
+
+            formatted.append(f"{line_prefix}{middle_gap}{name_and_padding}{comma}")
 
     return f"module {config['module_name']} (\n" + "\n".join(formatted) + "\n);\n\nendmodule"
 
@@ -131,6 +141,6 @@ if __name__ == "__main__":
         output_file = get_project_root() / "out" / "amba_top.sv"
         output_file.parent.mkdir(exist_ok=True)
         output_file.write_text(verilog_content, encoding='utf-8')
-        print(f"Successfully generated: {output_file}")
+        print(f"Successfully generated aligned SV: {output_file}")
     except Exception as e:
         print(f"Error: {e}")
