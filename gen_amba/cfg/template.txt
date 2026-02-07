@@ -1,0 +1,59 @@
+[axi4]
+GLOBAL: input  wire                      aclk
+GLOBAL: input  wire                      aresetn
+output wire [ID_W-1:0]           awid
+output wire [ADDR_WIDTH-1:0]     awaddr
+output wire [7:0]                awlen
+output wire [2:0]                awsize
+output wire [1:0]                awburst
+output wire                      awlock
+output wire [3:0]                awcache
+output wire [2:0]                awprot
+output wire [3:0]                awqos
+output wire [3:0]                awregion
+output wire [USER_W-1:0]         awuser
+output wire                      awvalid
+input  wire                      awready
+output wire [DATA_WIDTH-1:0]     wdata
+output wire [(DATA_WIDTH/8)-1:0] wstrb
+output wire                      wlast
+output wire [USER_W-1:0]         wuser
+output wire                      wvalid
+input  wire                      wready
+input  wire [ID_W-1:0]           bid
+input  wire [1:0]                bresp
+input  wire [USER_W-1:0]         buser
+input  wire                      bvalid
+output wire                      bready
+output wire [ID_W-1:0]           arid
+output wire [ADDR_WIDTH-1:0]     araddr
+output wire [7:0]                arlen
+output wire [2:0]                arsize
+output wire [1:0]                arburst
+output wire                      arlock
+output wire [3:0]                arcache
+output wire [2:0]                arprot
+output wire [3:0]                arqos
+output wire [3:0]                arregion
+output wire [USER_W-1:0]         aruser
+output wire                      arvalid
+input  wire                      arready
+input  wire [ID_W-1:0]           rid
+input  wire [DATA_WIDTH-1:0]     rdata
+input  wire [1:0]                rresp
+input  wire                      rlast
+input  wire [USER_W-1:0]         ruser
+input  wire                      rvalid
+output wire                      rready
+
+[apb]
+GLOBAL: input  wire                      pclk
+GLOBAL: input  wire                      presetn
+output wire [ADDR_WIDTH-1:0]     paddr
+output wire [2:0]                pprot
+output wire                      psel
+output wire                      penable
+output wire                      pwrite
+output wire [DATA_WIDTH-1:0]     pwdata
+input  wire [DATA_WIDTH-1:0]     prdata
+input  wire                      pready

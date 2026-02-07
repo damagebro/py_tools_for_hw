@@ -1,0 +1,35 @@
+{
+  "module_name": "amba_top_wrapper",
+  "instances": [
+    {
+      "prefix": "s00_axi",
+      "protocol": "axi4",
+      "mode": "slave",
+      "params": {
+        "ADDR_WIDTH": 32,
+        "DATA_WIDTH": 32,
+        "PROT_W": 3
+      }
+    },
+    {
+      "prefix": "m00_axi",
+      "protocol": "axi4",
+      "mode": "master",
+      "params": {
+        "ADDR_WIDTH": 64,
+        "DATA_WIDTH": 128,
+        "IW": 8,
+        "PROT_W": 3
+      }
+    },
+    {
+      "prefix": "p00_apb",
+      "protocol": "apb",
+      "mode": "master",
+      "params": {
+        "ADDR_WIDTH": 12,
+        "DATA_WIDTH": 32
+      }
+    }
+  ]
+}
