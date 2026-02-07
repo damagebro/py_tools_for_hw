@@ -3,7 +3,7 @@
   "template_file": "template_mini.txt",
   "instances": [
     {
-      "prefix": "s00_axi",
+      "prefix": ["s00_axi", "s01_axi", "s02_axi"],
       "protocol": "axi4_write",
       "mode": "master",
       "params": {
