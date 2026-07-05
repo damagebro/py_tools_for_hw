@@ -25,7 +25,7 @@ def generate_tb(module: ModuleModel, out_dir: str) -> list[Path]:
 
 
 def _testbench(module: ModuleModel) -> str:
-    targets = [
+    slaves = [
         reg for reg in module.registers if reg.reg_type in {"slave", "mem"}
     ]
     deep = max(
@@ -37,6 +37,7 @@ def _testbench(module: ModuleModel) -> str:
         f"localparam integer CSR_DW = {module.base_info.reg_bitwidth};",
         "reg clk;",
         "reg rst_n;",
+        "reg clear;",
         "reg i_csr_req_write;",
         "reg [CSR_AW-1:0] i_csr_req_addr;",
         "reg [CSR_DW-1:0] i_csr_req_wdata;",
@@ -49,6 +50,7 @@ def _testbench(module: ModuleModel) -> str:
     connections = [
         ".clk (clk)",
         ".rst_n (rst_n)",
+        ".clear (clear)",
         ".i_csr_req_write (i_csr_req_write)",
         ".i_csr_req_addr (i_csr_req_addr)",
         ".i_csr_req_wdata (i_csr_req_wdata)",
@@ -101,8 +103,8 @@ def _testbench(module: ModuleModel) -> str:
             ".o_pulse_err_read_when_empty (o_pulse_err_read_when_empty)",
         ])
         input_initializers.append("    i_pulse_shadow_rden = 1'b0;")
-    if targets:
-        count = len(targets)
+    if slaves:
+        count = len(slaves)
         declarations.extend([
             f"wire [{count - 1}:0] o_tx_csr_req_write;",
             f"wire [{count - 1}:0][CSR_AW-1:0] o_tx_csr_req_addr;",
@@ -177,6 +179,7 @@ def _testbench(module: ModuleModel) -> str:
         "initial begin",
         "    clk = 1'b0;",
         "    rst_n = 1'b0;",
+        "    clear = 1'b0;",
         "    i_csr_req_write = 1'b0;",
         "    i_csr_req_addr = '0;",
         "    i_csr_req_wdata = '0;",
@@ -214,6 +217,9 @@ def _basic_checks(module: ModuleModel) -> list[str]:
     if writable:
         field = writable.fields[0]
         mask = ((1 << field.width) - 1) << field.lsb
+        reset_value = (
+            field.default_for(0) << field.lsb
+        ) & mask
         lines.extend([
             f"    csr_write(CSR_AW'(32'h{writable.offset:08X}), "
             f"CSR_DW'(64'h{mask:X}));",
@@ -221,6 +227,15 @@ def _basic_checks(module: ModuleModel) -> list[str]:
             f"    if ((r_read_data & CSR_DW'(64'h{mask:X})) != "
             f"CSR_DW'(64'h{mask:X}))",
             f'        $fatal(1, "{writable.name} write/read mismatch");',
+            "    @(posedge clk);",
+            "    clear <= 1'b1;",
+            "    @(posedge clk);",
+            "    clear <= 1'b0;",
+            "    repeat (2) @(posedge clk);",
+            f"    csr_read(CSR_AW'(32'h{writable.offset:08X}), r_read_data);",
+            f"    if ((r_read_data & CSR_DW'(64'h{mask:X})) != "
+            f"CSR_DW'(64'h{reset_value:X}))",
+            f'        $fatal(1, "{writable.name} clear mismatch");',
         ])
     readable = next(
         (reg for reg in module.registers if reg.reg_type == "status"),

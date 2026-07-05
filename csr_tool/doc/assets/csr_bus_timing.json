@@ -1,0 +1,62 @@
+{
+  "signal": [
+    {
+      "name": "clk",
+      "wave": "p..........."
+    },
+    {
+      "name": "csr_req_valid",
+      "wave": "01...0......",
+      "node": "...ab......."
+    },
+    {
+      "name": "csr_req_ready",
+      "wave": "1..........."
+    },
+    {
+      "name": "csr_req_write",
+      "wave": "x1.0.x......"
+    },
+    {
+      "name": "csr_req_addr",
+      "wave": "x3456x......",
+      "data": [
+        "W0",
+        "W1",
+        "R0",
+        "R1"
+      ]
+    },
+    {
+      "name": "csr_req_wdata",
+      "wave": "x34xxx......",
+      "data": [
+        "WD0",
+        "WD1"
+      ]
+    },
+    {
+      "name": "csr_rsp_rvalid",
+      "wave": "0.....1010..",
+      "node": "......c.d..."
+    },
+    {
+      "name": "csr_rsp_rdata",
+      "wave": "x.....3x4x..",
+      "data": [
+        "RD0",
+        "RD1"
+      ]
+    }
+  ],
+  "edge": [
+    "a~>c read response",
+    "b~>d ordered return"
+  ],
+  "head": {
+    "text": "CSR bus continuous write and read timing"
+  },
+  "config": {
+    "hscale": 2
+  }
+}

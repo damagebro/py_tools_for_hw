@@ -132,8 +132,33 @@ class ParserTests(unittest.TestCase):
             run(str(source), temp, nested=False)
             rtl = (Path(temp) / "rtl" / "shadow.sv").read_text(encoding="utf-8")
             self.assertIn("localparam integer SHADOW_DEPTH = 4;", rtl)
+            self.assertRegex(
+                rtl,
+                r"REG_CFG_QUEUE_0_ADDR\s+= CSR_AW'\(32'h00000000\);",
+            )
+            self.assertRegex(
+                rtl,
+                r"REG_CFG_QUEUE_1_ADDR\s+= CSR_AW'\(32'h00000004\);",
+            )
+            self.assertRegex(
+                rtl,
+                r"REG_IRQ_STATE_ADDR\s+= CSR_AW'\(32'h00000008\);",
+            )
             self.assertIn("r_cfg_queue_value[r_shadow_wr_idx]", rtl)
             self.assertIn("assign o_irqclr_irq_state_done", rtl)
+            self.assertIn(
+                "b_local_write_fire && "
+                "(i_csr_req_addr == REG_IRQ_STATE_ADDR)",
+                rtl,
+            )
+            self.assertIn(
+                "i_csr_req_addr == REG_IRQ_STATE_ADDR",
+                rtl,
+            )
+            self.assertNotIn("i_csr_req_addr == CSR_AW'", rtl)
+            self.assertIn("if (!rst_n) begin", rtl)
+            self.assertIn("else if (clear) begin", rtl)
+            self.assertNotIn("if (!rst_n || clear)", rtl)
             self.assertNotIn("always_ff", rtl)
 
     def test_generated_rtl_port_columns_are_aligned(self) -> None:
@@ -144,6 +169,9 @@ class ParserTests(unittest.TestCase):
                 nested=True,
             )
             rtl = (Path(temp) / "rtl" / "top.sv").read_text(encoding="utf-8")
+            self.assertIn("parameter CSR_AW = 32,", rtl)
+            self.assertIn("parameter CSR_DW = 32", rtl)
+            self.assertNotIn("parameter integer", rtl)
             port_block = rtl.split("(", 2)[2].split(");", 1)[0]
             port_lines = [
                 line for line in port_block.splitlines()
@@ -157,10 +185,272 @@ class ParserTests(unittest.TestCase):
 
             signal_columns = set()
             for line in port_lines:
-                declaration = line.split("//,", 1)[0].rsplit(",", 1)[0]
+                declaration = (
+                    line.split(" //", 1)[0]
+                    .split("//,", 1)[0]
+                    .rsplit(",", 1)[0]
+                )
                 signal = declaration.split()[-1]
                 signal_columns.add(line.index(signal))
             self.assertEqual(len(signal_columns), 1)
+
+            tx_position = port_block.index("o_tx_csr_req_write")
+            register_positions = [
+                port_block.index("o_cmd_top_ctrl_start"),
+                port_block.index("i_sta_top_ver_date"),
+                port_block.index("o_cfg_test1_data"),
+            ]
+            self.assertTrue(
+                all(tx_position < position for position in register_positions)
+            )
+            self.assertLess(
+                port_block.index("clear"),
+                port_block.index("i_csr_req_write"),
+            )
+            self.assertIn("if (!rst_n) begin", rtl)
+            self.assertIn("else if (clear) begin", rtl)
+            self.assertNotIn("if (!rst_n || clear)", rtl)
+            self.assertIn(
+                "if (!rst_n)\n"
+                "        r_top_ctrl_start <= 1'h0;\n"
+                "    else if (clear)\n"
+                "        r_top_ctrl_start <= 1'h0;",
+                rtl,
+            )
+            self.assertNotIn(
+                "if (!rst_n) begin\n"
+                "        r_top_ctrl_start <= 1'h0;",
+                rtl,
+            )
+            self.assertIn(
+                "assign o_csr_rsp_rvalid = w_rsp_rvalid && !clear;",
+                rtl,
+            )
+            self.assertIn(
+                "SLV_MID_A_ADDR_S = CSR_AW'(32'h00001000);",
+                rtl,
+            )
+            self.assertIn(
+                "SLV_MID_A_ADDR_E = CSR_AW'(32'h000017FF);",
+                rtl,
+            )
+            self.assertIn(
+                "i_csr_req_addr >= SLV_MID_A_ADDR_S",
+                rtl,
+            )
+            self.assertIn(
+                "i_csr_req_addr <= SLV_MID_A_ADDR_E",
+                rtl,
+            )
+            self.assertIn(
+                "if ((i_csr_req_addr >= SLV_MID_A_ADDR_S) && "
+                "(i_csr_req_addr <= SLV_MID_A_ADDR_E))",
+                rtl,
+            )
+            self.assertNotIn(
+                "SLV_MID_A_ADDR_S) &&\n",
+                rtl,
+            )
+            self.assertIn(
+                "i_csr_req_addr - SLV_MID_A_ADDR_S",
+                rtl,
+            )
+            self.assertIn("localparam integer SLV_SEL_W = 2;", rtl)
+            self.assertIn(
+                "localparam [SLV_SEL_W-1:0] SLV_LOCAL = 'd0;\n"
+                "localparam [SLV_SEL_W-1:0] SLV_MID_A = 'd1;\n"
+                "localparam [SLV_SEL_W-1:0] SLV_MID_B = 'd2;\n"
+                "localparam [CSR_AW-1:0] SLV_MID_A_ADDR_S",
+                rtl,
+            )
+            self.assertIn("w_req_slv", rtl)
+            self.assertIn("r_read_slv", rtl)
+            self.assertIn("b_slv_switch_block", rtl)
+            self.assertNotIn("TARGET_", rtl)
+            self.assertNotIn("w_req_target", rtl)
+            self.assertIn(
+                "assign o_tx_csr_req_valid[1] = i_csr_req_valid && "
+                "!clear && !b_slv_switch_block && "
+                "(w_req_slv == SLV_MID_B);",
+                rtl,
+            )
+            self.assertNotIn(
+                "o_tx_csr_req_valid[1] = i_csr_req_valid &&\n",
+                rtl,
+            )
+            self.assertIn(
+                "r_otf_cnt <= r_otf_cnt + "
+                "b_read_fire - b_rsp_fire;",
+                rtl,
+            )
+            self.assertIn(
+                "else if (b_read_fire && (r_otf_cnt == '0))\n"
+                "        r_read_slv <= w_req_slv;\n"
+                "end\n\n"
+                "always @(posedge clk or negedge rst_n) begin",
+                rtl,
+            )
+            self.assertIn(
+                "else if (b_read_fire || b_rsp_fire)\n"
+                "        r_otf_cnt <= r_otf_cnt + "
+                "b_read_fire - b_rsp_fire;",
+                rtl,
+            )
+            self.assertNotIn(
+                "r_read_slv <= w_req_slv;\n"
+                "        r_otf_cnt <=",
+                rtl,
+            )
+            self.assertIn(
+                "CSR_INVALID_RDATA = CSR_DW'(32'hDEAFDEAF);",
+                rtl,
+            )
+            self.assertIn(
+                "w_local_rdata = CSR_INVALID_RDATA;",
+                rtl,
+            )
+            self.assertIn(
+                "w_rsp_rdata = CSR_INVALID_RDATA;",
+                rtl,
+            )
+            self.assertIn(
+                "always @* begin\n"
+                "    case (r_read_slv)",
+                rtl,
+            )
+            self.assertNotIn(
+                "always @* begin\n"
+                "    w_rsp_rdata = r_local_rsp_rdata;\n"
+                "    w_rsp_rvalid = r_local_rsp_rvalid;\n"
+                "    case (r_read_slv)",
+                rtl,
+            )
+            self.assertIn(
+                "always @* begin\n"
+                "    w_local_rdata = '0;\n"
+                "    case (i_csr_req_addr)\n"
+                "        REG_TOP_CTRL_ADDR: begin",
+                rtl,
+            )
+            self.assertNotIn(
+                "if (i_csr_req_addr == REG_TOP_CTRL_ADDR)",
+                rtl,
+            )
+            self.assertIn(
+                "REG_TOP_VER_ADDR: begin",
+                rtl,
+            )
+            self.assertIn(
+                "default: w_local_rdata = CSR_INVALID_RDATA;",
+                rtl,
+            )
+            self.assertLess(
+                rtl.index("REG_TOP_CTRL_ADDR: begin"),
+                rtl.index("w_local_rdata = CSR_INVALID_RDATA;"),
+            )
+            self.assertIn(
+                "for (int byte_idx = 0; "
+                "byte_idx < (CSR_DW / 8); "
+                "byte_idx = byte_idx + 1) begin",
+                rtl,
+            )
+            self.assertNotIn("integer byte_idx;", rtl)
+            self.assertNotIn(
+                "case ({b_read_fire, b_rsp_fire})",
+                rtl,
+            )
+            self.assertIn(
+                "o_tx_csr_req_write",
+                rtl,
+            )
+            self.assertIn("// [0]=mid_a, [1]=mid_b", rtl)
+            self.assertRegex(
+                rtl,
+                r"REG_TOP_CTRL_ADDR\s+= CSR_AW'\(32'h00000000\);",
+            )
+            self.assertIn(
+                "CSR_INVALID_RDATA = CSR_DW'(32'hDEAFDEAF);\n\n"
+                "localparam [CSR_AW-1:0] REG_TOP_CTRL_ADDR",
+                rtl,
+            )
+            self.assertRegex(
+                rtl,
+                r"REG_TEST1_0_ADDR\s+= CSR_AW'\(32'h00003000\);",
+            )
+            self.assertRegex(
+                rtl,
+                r"REG_TEST1_3_ADDR\s+= CSR_AW'\(32'h0000300C\);",
+            )
+            reg_addr_lines = [
+                line for line in rtl.splitlines()
+                if line.startswith("localparam [CSR_AW-1:0] REG_")
+            ]
+            self.assertEqual(
+                len({line.index("=") for line in reg_addr_lines}),
+                1,
+            )
+            self.assertIn(
+                "i_csr_req_addr == REG_TOP_CTRL_ADDR",
+                rtl,
+            )
+            self.assertIn(
+                "if (b_local_write_fire && "
+                "(i_csr_req_addr == REG_TOP_CTRL_ADDR)) begin",
+                rtl,
+            )
+            self.assertIn(
+                "r_test1_data[0] <= i_csr_req_wdata[31:0] & "
+                "w_csr_wmask[31:0];",
+                rtl,
+            )
+            self.assertNotIn(
+                "r_test1_data[0] & ~w_csr_wmask",
+                rtl,
+            )
+            self.assertNotIn(
+                "r_test1_data[0] <= i_csr_req_wdata[31:0];",
+                rtl,
+            )
+            self.assertIn(
+                "assign b_local_write_fire = "
+                "b_req_fire && i_csr_req_write &&",
+                rtl,
+            )
+            self.assertNotIn(
+                "if (b_req_fire && i_csr_req_write",
+                rtl,
+            )
+            self.assertIn(
+                "assign b_req_fire = "
+                "i_csr_req_valid && o_csr_req_ready;",
+                rtl,
+            )
+            self.assertIn(
+                "assign b_local_read_fire = b_read_fire &&",
+                rtl,
+            )
+            self.assertNotIn("_accept", rtl)
+            self.assertNotIn("i_csr_req_addr == CSR_AW'", rtl)
+
+            mid_b_rtl = (
+                Path(temp) / "rtl" / "mid_b.sv"
+            ).read_text(encoding="utf-8")
+            self.assertIn("SLV_LEAF_A2_ADDR_S", mid_b_rtl)
+            self.assertIn("SLV_LEAF_A2_ADDR_E", mid_b_rtl)
+            self.assertNotIn("SLV_B_SLV", mid_b_rtl)
+            self.assertIn("// [0]=b_mem, [1]=leaf_a2", mid_b_rtl)
+
+            wrapper = (
+                Path(temp) / "rtl" / "plus" / "top_wrap.sv"
+            ).read_text(encoding="utf-8")
+            self.assertLess(
+                wrapper.index("o_tx_csr_req_write"),
+                wrapper.index("o_cfg"),
+            )
+            self.assertIn("input  wire", wrapper)
+            self.assertIn("clear", wrapper)
+            self.assertNotIn("parameter integer", wrapper)
+            self.assertIn("// [0]=mid_a, [1]=mid_b", wrapper)
 
     def test_tree_html_uses_register_detail_tables(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

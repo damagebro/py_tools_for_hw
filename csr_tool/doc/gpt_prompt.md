@@ -581,9 +581,11 @@ out/rtl/plus/tmp_<block>.sv
 ### 9.1 主模块参数与 bus
 
 ```systemverilog
-parameter integer CSR_AW = 32
-parameter integer CSR_DW = <reg_bitwidth>
+parameter CSR_AW = 32
+parameter CSR_DW = <reg_bitwidth>
 ```
+
+parameter 声明不添加 `integer` 类型。
 
 端口：
 
@@ -601,6 +603,26 @@ output wire                  o_csr_rsp_rvalid
 ```
 
 写请求没有 response；读请求通过 rvalid/rdata 返回。
+
+主 RTL 与 wrapper 的端口顺序固定为：
+
+1. `clk/rst_n/clear`
+2. CSR RX：上游 request 与 read response
+3. CSR TX：发往 slave/mem 的 request/response 数组
+4. CSR register：cfg/status/cmd/irq
+5. shadow 控制、debug 和 error
+
+CSR RX/TX 必须连续放在一起，所有 CSR register 相关端口放在最后。
+
+`clear` 为高有效同步清零：
+
+- 端口顺序位于 `clk/rst_n` 之后。
+- 不加入 always sensitivity list。
+- 时序逻辑必须先使用 `if (!rst_n)`，再使用 `else if (clear)`。
+  禁止合并写成 `if (!rst_n || clear)`；因此 rst_n 异步、clear 同步且优先级明确。
+- clear 恢复 cfg/cmd/shadow 默认值，并清空 local response、outstanding
+  counter 和 shadow FIFO 控制状态。
+- clear 有效时 `o_csr_req_ready=0`、TX request valid=0、RX response valid=0。
 
 ### 9.2 field 端口
 
@@ -647,7 +669,7 @@ output wire [N-1:0][FIELD_W-1:0] o_cfg_xxx
     input  wire [1:0]               i_tx_csr_rsp_rvalid  //,
 ```
 
-- 普通端口与 target 数组端口必须共享同一列宽。
+- 普通端口与 slv 数组端口必须共享同一列宽。
 - 所有逗号位于同一列。
 - 所有 signal name 起始于同一列。
 - 最后一个端口不用真实逗号，在同一列输出 `//,`。
@@ -660,7 +682,7 @@ output wire [N-1:0][FIELD_W-1:0] o_cfg_xxx
 - DFF 在生成模块内部。
 - 软件 RW。
 - reset 使用 field 默认值。
-- 写入遵守 byte strobe。
+- 写入使用对应 field 的 `i_csr_req_wdata & w_csr_wmask`，不与旧值合并。
 
 `status`：
 
@@ -679,23 +701,52 @@ output wire [N-1:0][FIELD_W-1:0] o_cfg_xxx
 - 软件读取 `i_irqsta_*`。
 - W1C 写入组合地产生 `o_irqclr_*`，没有内部 IRQ 状态 DFF。
 
-未命中的本地读返回 0。
+本地读译码组合块开头统一执行 `w_local_rdata = '0;`，随后使用
+`case (i_csr_req_addr)`。每个 `REG_<NAME>_ADDR` case item 只覆盖对应 field，
+确保有效寄存器的保留位为 0；`default` 对未命中的本地空洞地址返回
+`CSR_INVALID_RDATA`。
+
+```systemverilog
+localparam [CSR_DW-1:0] CSR_INVALID_RDATA = CSR_DW'(32'hDEAFDEAF);
+```
+
+`w_local_rdata` 的空洞地址分支与 `w_rsp_rdata` 的默认分支必须共同使用
+`CSR_INVALID_RDATA`。
+
+response mux 的 `case (r_read_slv)` 每个分支和 `default` 都必须完整赋值
+`w_rsp_rdata/w_rsp_rvalid`，case 前不重复添加默认赋值。
 
 每个 cfg/cmd RegisterModel 使用一个独立 `always @(posedge clk or negedge rst_n)`。
+本地写握手条件必须抽为：
+
+```systemverilog
+assign b_req_fire = i_csr_req_valid && o_csr_req_ready;
+assign b_read_fire = b_req_fire && !i_csr_req_write;
+assign b_rsp_fire = w_rsp_rvalid;
+assign b_local_read_fire = b_read_fire && (w_req_slv == SLV_LOCAL);
+assign b_local_write_fire = b_req_fire && i_csr_req_write &&
+                            (w_req_slv == SLV_LOCAL);
+```
+
+所有握手成功事件统一使用 `_fire` 后缀，不生成 `_accept` 信号。
+cfg/cmd 写译码和 IRQ clear 统一使用 `b_local_write_fire`，地址条件与其写在
+同一个 `if` 或组合表达式中，避免重复展开 request、write 和 slv 条件。
 
 ### 9.5 byte strobe
 
 组合生成 `w_csr_wmask`：
 
 ```systemverilog
-for (byte_idx = 0; byte_idx < CSR_DW / 8; byte_idx = byte_idx + 1)
+for (int byte_idx = 0; byte_idx < CSR_DW / 8; byte_idx = byte_idx + 1)
     w_csr_wmask[byte_idx*8 +: 8] = {8{i_csr_req_wstrb[byte_idx]}};
 ```
+
+`byte_idx` 只在 for 初始化语句中声明，不单独生成 `integer byte_idx;`。
 
 cfg 写公式：
 
 ```text
-(old & ~mask) | (wdata & mask)
+storage <= wdata & mask
 ```
 
 cmd 写公式：
@@ -739,9 +790,9 @@ o_pulse_err_read_when_empty
 - user RTL 输出和软件读使用 `working[rd_idx]`。
 - `shadow 1` 与深 shadow 共用 upen，但各自更新自己的 working。
 
-### 9.8 slave/mem target bus
+### 9.8 slave/mem slv bus
 
-每个 slave/mem 占一个固定 packed array 索引。若 target 数为 M，端口为：
+每个 slave/mem 占一个固定 packed array 索引。若 slv 数为 M，端口为：
 
 ```text
 o_tx_csr_req_write[M]
@@ -754,21 +805,54 @@ i_tx_csr_rsp_rdata[M][CSR_DW]
 i_tx_csr_rsp_rvalid[M]
 ```
 
-target 地址输出减去该区域起始 offset，转换为 target 本地地址。
+slv 地址输出减去该区域起始 offset，转换为 slv 本地地址。
+
+每个 slave/mem slv 必须生成包含末地址的范围 localparam：
+
+```systemverilog
+localparam [CSR_AW-1:0] SLV_<BLOCK_NAME>_ADDR_S = CSR_AW'(...);
+localparam [CSR_AW-1:0] SLV_<BLOCK_NAME>_ADDR_E = CSR_AW'(...);
+```
+
+- `ADDR_E = offset + bytesize - 1`。
+- demux 使用 `addr >= ADDR_S && addr <= ADDR_E`。
+- demux 的起止地址比较必须写在同一个 `if` 行。
+- slave 的 `<BLOCK_NAME>` 来自被引用文件的 block 名，不使用 slave
+  `reg_name`；mem 使用自身 `reg_name`。
+- 同一父 block 内重复引用同名 block 时，依次添加 `_U1`、`_U2`。
+- TX 本地地址使用 `i_csr_req_addr - SLV_<BLOCK_NAME>_ADDR_S`。
+- 后续逻辑不得重复嵌入 slv 起止地址的裸 `CSR_AW'(32'h...)`。
+
+TX CSR bus 的 `o_tx_csr_req_write` 端口后必须用单行注释注明索引对应的
+block：
+
+```systemverilog
+output wire [1:0] o_tx_csr_req_write, // [0]=block_a, [1]=block_b
+```
+
+每个 `o_tx_csr_req_valid[index]` 的 valid、clear、切换阻塞和 slv 选择条件
+必须写在同一个 assign 行。
 
 写请求：
 
 - 按地址直接路由。
-- ready 来自选中 target。
+- ready 来自选中 slv。
 - 不等待写 response。
 
 读请求：
 
-- local 视为 target 0，其余 target 从 1 编号。
-- `r_read_target` 记录当前 outstanding 读目标。
+- local 视为 slv 0，其余 slv 从 1 编号。
+- `r_read_slv` 记录当前 outstanding 读目标。
 - `r_otf_cnt` 记录已接受读请求减已返回 response。
-- 同一 target 允许连续 outstanding 读。
-- outstanding 非零时切换到另一 target，必须反压新读请求。
+- `r_read_slv` 与 `r_otf_cnt` 必须使用两个独立的时序 always 块。
+- `r_read_slv` 只在 `b_read_fire && (r_otf_cnt == '0)` 时更新。
+- `r_otf_cnt` 只在 `b_read_fire || b_rsp_fire` 的 `else if` 分支中更新，
+  其他周期自然保持。
+- `r_otf_cnt` 在更新分支直接执行
+  `r_otf_cnt <= r_otf_cnt + b_read_fire - b_rsp_fire;`，不要使用 case
+  分别描述加一、减一和保持。
+- 同一 slv 允许连续 outstanding 读。
+- outstanding 非零时切换到另一 slv，必须反压新读请求。
 - outstanding 清零后才允许切换，保证无 ID bus 的返回顺序。
 - local read response 使用一级 valid/data 寄存器。
 
@@ -777,10 +861,25 @@ target 地址输出减去该区域起始 offset，转换为 target 本地地址�
 ```systemverilog
 localparam integer CSR_REQ_OSD_NUM = 256;
 localparam integer OTF_CNT_W = $clog2(CSR_REQ_OSD_NUM);
-localparam integer TARGET_SEL_W = <clog2(target_count + 1)，最少 1>;
+localparam integer SLV_SEL_W = <clog2(slv_count + 1)，最少 1>;
 ```
 
-不要生成未使用的 `TARGET_NUM`，不要生成未使用的 `b_req_is_write`。
+所有 `SLV_LOCAL`、`SLV_<BLOCK_NAME>` selector 与 `SLV_<BLOCK_NAME>_ADDR_S/E`
+localparam 必须连续分组输出，中间不插入 `CSR_INVALID_RDATA` 或 `REG_*_ADDR`。
+
+每个非 slave/mem 寄存器地址也必须生成 localparam，并在 read decode、
+cfg/cmd write decode 和 IRQ clear 中引用，不能重复写地址字面量：
+
+```systemverilog
+localparam [CSR_AW-1:0] REG_<REG_NAME>_ADDR = CSR_AW'(...);
+```
+
+repeat 寄存器的每个元素独立生成：
+`REG_<REG_NAME>_0_ADDR`、`REG_<REG_NAME>_1_ADDR`，依次类推。
+第一个 `REG_*_ADDR` 前空一行，与前面的 localparam 分组分隔。
+同一模块内所有 `REG_*_ADDR` localparam 按最长名称补空格，`=` 必须对齐。
+
+不要生成未使用的 `SLV_NUM`，不要生成未使用的 `b_req_is_write`。
 
 ### 9.9 RTL 代码风格
 
@@ -794,6 +893,8 @@ localparam integer TARGET_SEL_W = <clog2(target_count + 1)，最少 1>;
 - 组合 reg 使用 `w_` 前缀。
 - 单 bit 组合条件推荐 `b_`。
 - 时序逻辑只用 `always @(posedge clk or negedge rst_n)`。
+- DFF 的 reset 或 clear 分支只有一条赋值时省略 `begin/end`；分支内有多条
+  赋值时保留 `begin/end`。
 - 组合逻辑只用 `always @*` 或 `assign`。
 - 输出信号优先由 `assign` 驱动；组合过程驱动的 ready 声明为 output reg。
 - 代码块顺序：localparam、signal、output assign、statement、instance。
@@ -816,7 +917,7 @@ typedef 文件按存在的类型生成 packed struct：
 wrapper：
 
 - include typedef 文件。
-- bus 和 target bus 保持展开。
+- bus 和 slv bus 保持展开。
 - cfg/status/cmd/irq 使用 struct 聚合。
 - 实例名为 `u_<module>_<tag>` 形式。
 - 子模块端口不能直接连接 wrapper 端口。
@@ -851,7 +952,7 @@ out/tb/<block>_ral_pkg.sv
 - 10ns clock。
 - 异步低有效复位。
 - 提供 `csr_write` 和 `csr_read` task。
-- target ready 默认全 1，target response 默认 0。
+- slv ready 默认全 1，slv response 默认 0。
 - 自动选择一个无 shadow 的 cfg/cmd 做 write/read 检查。
 - 若有 status，驱动第一个 status field 并检查读取。
 - 成功打印 `<block>_tb PASS`。
@@ -1056,7 +1157,7 @@ git diff --check
 5. `reg_gen_doc.py`
 6. `reg_gen_firmware.py`
 7. `reg_gen_rtl.py`
-8. shadow、irq、target read ordering
+8. shadow、irq、slv read ordering
 9. typedef 和 wrapper
 10. `reg_gen_tb.py`
 11. CLI

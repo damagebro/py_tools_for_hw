@@ -141,7 +141,7 @@ def traverse_tree(module: ModuleModel, depth=0):
 
 ## 6. 硬件 CSR 与 RTL 生成说明
 
-硬件 CSR 的目标是把软件可见的寄存器访问，转换成 RTL 内部稳定、清晰、可集成的控制/状态接口。`csr_tool` 当前支持生成单模块 CSR RTL，主输出位于 `out/rtl/${BLOCK}.sv`。大多数用户只需要直接使用这个主文件；增强辅助文件放在 `out/rtl/plus/`，包括 typedef、struct wrapper 和集成模板。
+硬件 CSR 的目标是把软件可见的寄存器访问，转换成 RTL 内部稳定、清晰、可集成的控制/状态接口。`csr_tool` 当前支持生成单模块 CSR RTL，主输出位于 `out/rtl/${block}.sv`。`block`由输入模块名规范为小写，实际生成的RTL模块名和文件名也使用小写。大多数用户只需要直接使用这个主文件；增强辅助文件放在 `out/rtl/plus/`，包括 typedef、struct wrapper 和集成模板。
 
 ### 6.1 csr_bus 接口特点
 
@@ -192,13 +192,13 @@ shadow 数据流如下图所示：
 Single 模式下，RTL 输出默认分两层：
 
 ```text
-out/rtl/${BLOCK}.sv
-out/rtl/plus/${BLOCK}_TYPEDEF.sv
-out/rtl/plus/${BLOCK}_WRAP.sv
+out/rtl/${block}.sv
+out/rtl/plus/${block}_typedef.sv
+out/rtl/plus/${block}_wrap.sv
 out/rtl/plus/tmp_${block}.sv
 ```
 
-- `${BLOCK}.sv`：主 CSR RTL，端口保持展开形式，方便直接接入现有设计。
-- `${BLOCK}_TYPEDEF.sv`：共享 typedef 文件，供 wrapper 和 user RTL 共同 include。
-- `${BLOCK}_WRAP.sv`：用 SystemVerilog `struct` 聚合 `cfg/status/cmd/irq` 接口，减少顶层端口数量。
+- `${block}.sv`：主 CSR RTL，端口保持展开形式，方便直接接入现有设计。
+- `${block}_typedef.sv`：共享 typedef 文件，供 wrapper 和 user RTL 共同 include。
+- `${block}_wrap.sv`：用 SystemVerilog `struct` 聚合 `cfg/status/cmd/irq` 接口，减少顶层端口数量。
 - `tmp_${block}.sv`：临时集成模板，展示 autogen RTL 与 user RTL 的普通端口连接方式，以及 struct 版本接口写法。
