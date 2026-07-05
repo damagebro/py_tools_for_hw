@@ -1,9 +1,3 @@
-# base_info
-
-| item         | type_input |
-| :----------- | :--------- |
-| reg_bitwidth | 32         |
-
 # reg_define
 
 | offset | reg_name | field | msb | lsb | SW_access | default_value | reg_type | special | description |

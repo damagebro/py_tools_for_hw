@@ -238,8 +238,9 @@ SubModuleInstance = SubModuleNode
 - `0x` 十六进制
 - 数字中的下划线，例如 `0xf000_0000`
 
-标识符必须符合 `[A-Za-z_][A-Za-z0-9_]*`，统一转小写。检查 Python、C 和
-SystemVerilog 保留字。错误信息必须指出用户可见的模块、寄存器或字段。
+标识符必须符合 `[A-Za-z_][A-Za-z0-9_]*`，统一转小写。检查 Python、C、
+SystemVerilog 和 VHDL 保留字；VHDL 列表覆盖 VHDL-2008 以及常用
+VHDL-2019 PSL 相关保留字。错误信息必须指出用户可见的模块、寄存器或字段。
 
 `expand_defaults` 行为：
 
@@ -488,20 +489,70 @@ Markdown 输出必须可以再次作为输入，并得到相同模型和生成�
 
 tree Markdown 包含：
 
-- Address Map 表：path、absolute base、local size、source。
+- Address Map 表三列为 `block`、`address_range`、`bytesize`。
+- block 内容使用树形编号加当前 block name，例如 `1 top`、`1.1 mid_a`，
+  不输出 `top/mid_a` 完整路径。
 - 按深度优先顺序列出每个模块的寄存器表。
+- block 标题下面直接输出寄存器表，不输出 Base address 或 Source 条目。
+- tree Markdown 寄存器表第一列叫 `address`，使用绝对地址。
+- 绝对地址为 system_baseaddr 加各层 slave offset，再加当前寄存器 offset。
+- single 的 `<block>_gen.md` 仍使用相对 `offset`，保持可回灌。
 
 tree HTML：
 
 - 单文件离线 HTML。
-- Address Map path 可跳转。
+- Address Map 第一列为 block，内容使用树形编号和当前 block name，可跳转。
 - 每个模块使用 `<details>` 折叠。
+- 页面使用左侧导航栏和右侧正文的双栏布局。
+- 侧边栏包含 Address Map、模块路径和模块内寄存器链接。
+- 侧边栏默认折叠为 52px，只显示 hamburger 展开按钮。
+- 点击按钮展开为 280px，再次点击收起；按钮同步更新 aria-label/title。
+- 每个模块标题使用原生 `<details>/<summary>`，默认收起。
+- 点击模块标题可独立展开或折叠该模块的寄存器链接。
+- summary 只负责折叠，不能在 summary 内嵌覆盖点击区域的链接。
+- 展开内容只显示寄存器链接，不显示 Overview。
+- 桌面端侧边栏 sticky、占满视口高度并独立滚动。
+- 窄屏时侧边栏变为顶部横向导航，并隐藏二级寄存器链接。
+- 所有导航链接必须指向真实存在的 address/module/register id。
+- 寄存器导航显示绝对地址，例如 `top_ctrl (0xF0000000)`。
+- 每张 register table 上方有独立标题：
+  `<reg_name> (0x<absolute_address>)`。
+- register table 内部的 reg_name 单元格只显示名字，不重复显示括号地址。
+- 模块标题使用树形章节编号，只显示当前 block name：
+  `1 top`、`1.1 mid_a`、`1.1.1 leaf_a1`，不显示完整路径。
+- tree 中同名 block 出现多次时，所有实例按深度优先顺序唯一化为
+  `<block>_u1`、`<block>_u2`；该名字用于 Address Map、侧栏、block 标题
+  和 XLSX sheet 名，但不修改 RTL module 名或单模块文件名。
+- HTML block 标题只显示树形编号和当前 block name，不附加 base/source。
+- 每个寄存器使用一张独立的 `register-table`。
+- 寄存器属性区依次显示：
+  - `reg_name` 与绝对 `address`
+  - `reg_type` 与 `special`
+  - 合并后的 `SW_access`，不分别显示 SW/HW
+- field 区使用当前输入规范的表头：
+  `field`、`bit_scope`、`default_value`、`description`。
+- `bit_scope` 合并输入中的 msb/lsb，显示为 `[msb:lsb]`，例如 `[31:0]`。
+- Markdown/XLSX/JSON 输入输出模型仍分别保留 msb 和 lsb，不做 schema 修改。
+- 不照搬参考页面中的中文表头或 `type/spec/default/comment` 别名。
+- 属性表头和 field 表头使用灰色背景，值单元格使用白色背景。
+- register table 不使用 `width: 100%` 铺满页面。
+- `field`、`bit_scope`、`default_value` 三列各宽 `20ch`。
+- `description` 列宽 `60ch`，整张 register table 宽 `120ch`。
+- 页面较窄时由模块 `<details>` 提供横向滚动。
 - 不依赖外部 CSS/JS。
 
 tree XLSX：
 
 - 第一张 sheet 为 `address_map`。
+- Address Map 使用 `address_range`，格式为
+  `0x<start_addr> ~ 0x<end_addr>`。
+- Address Map 数据列为 `block`、`address_range`、`bytesize`，不显示 source。
+- block 使用树形编号和当前 block name，不使用完整路径。
+- `bytesize` 使用十六进制，例如 `0x800`。
+- HTML Address Map 不铺满正文，三列各宽 `30ch`，整表宽 `90ch`。
+- 根节点范围使用 `system_bytesize`，子节点范围使用父节点分配的 bytesize。
 - 后续每个节点一张 sheet。
+- 每个 block sheet 第一列为 `address`，内容是逐级累加后的绝对地址。
 - address_map 有跳转到对应 sheet 的 hyperlink。
 - sheet 名最长 31 字符并去重。
 - 第一行加粗和填色，freeze panes，auto filter，自动列宽。
@@ -889,7 +940,7 @@ out/firmware/<root>_all_reg_type.h
 
 ## 13. 自动测试
 
-使用标准库 `unittest`，文件为 `test_parser.py`。至少实现以下 7 项：
+使用标准库 `unittest`，文件为 `test_parser.py`。至少实现以下 8 项：
 
 1. nested address map 和重复 reg_name 去重。
    - 检查 `test1..test4`。
@@ -918,13 +969,19 @@ out/firmware/<root>_all_reg_type.h
    - 所有 input/output 的 signal name 起始列一致。
    - 所有真实逗号和末尾 `//,` 列一致。
 
+8. nested HTML 寄存器详情表。
+   - 存在 `register-table`。
+   - 存在当前规范的属性和 field 表头。
+   - 只显示合并后的 `SW_access`。
+   - 不显示独立的 `SW` 或 `HW` 表头。
+
 运行：
 
 ```bash
 python -B -m unittest -v
 ```
 
-预期：7 项全部通过。
+预期：8 项全部通过。
 
 ---
 
@@ -963,7 +1020,7 @@ JSON 输入比 Markdown/XLSX 多一个 tree JSON。
 当前基准：
 
 ```text
-Python unittest:       7/7 pass
+Python unittest:       8/8 pass
 SV syntax:             30 files, 0 failures
 RTL + TB semantics:     5 pairs, 0 failures
 ```

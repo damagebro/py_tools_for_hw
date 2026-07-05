@@ -76,6 +76,22 @@ class ParserTests(unittest.TestCase):
             with self.assertRaisesRegex(CSRValidationError, "reserved keyword"):
                 CSRParser(str(path)).parse()
 
+    def test_vhdl_reserved_field_name_is_rejected(self) -> None:
+        text = """# reg_define
+
+| offset | reg_name | field | msb | lsb | SW_access | default_value | reg_type | special | description |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 0x0 | first | architecture | 0 | 0 | RW | 0 | cfg | - | |
+"""
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "bad.md"
+            path.write_text(text, encoding="utf-8")
+            with self.assertRaisesRegex(
+                CSRValidationError,
+                "'architecture' is a reserved keyword",
+            ):
+                CSRParser(str(path)).parse()
+
     def test_json_round_trip(self) -> None:
         original = CSRParser(str(ROOT / "input" / "leaf_a2_reg.md")).parse()
         with tempfile.TemporaryDirectory() as temp:
@@ -145,6 +161,158 @@ class ParserTests(unittest.TestCase):
                 signal = declaration.split()[-1]
                 signal_columns.add(line.index(signal))
             self.assertEqual(len(signal_columns), 1)
+
+    def test_tree_html_uses_register_detail_tables(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            run(
+                str(ROOT / "input" / "top_reg.md"),
+                temp,
+                nested=True,
+            )
+            page = (Path(temp) / "doc" / "top_tree.html").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn('class="register-table"', page)
+            for heading in (
+                "reg_name",
+                "address",
+                "reg_type",
+                "special",
+                "SW_access",
+                "field",
+                "bit_scope",
+                "default_value",
+                "description",
+            ):
+                self.assertIn(f">{heading}<", page)
+            self.assertNotIn(">SW<", page)
+            self.assertNotIn(">HW<", page)
+            self.assertNotIn(">msb<", page)
+            self.assertNotIn(">lsb<", page)
+            self.assertIn(">[31:0]<", page)
+            self.assertEqual(page.count('<col style="width:20ch">'), 3 * 25)
+            self.assertEqual(page.count('<col style="width:60ch">'), 25)
+            self.assertIn('<aside class="sidebar">', page)
+            self.assertIn('class="page-shell sidebar-collapsed"', page)
+            self.assertIn('data-testid="sidebar-toggle"', page)
+            self.assertIn('<a class="nav-address" href="#address-map">', page)
+            self.assertIn('<details class="nav-module-group"', page)
+            self.assertIn(
+                '<summary class="nav-module">1 top</summary>',
+                page,
+            )
+            self.assertIn(
+                '<summary class="nav-module">1.1 mid_a</summary>',
+                page,
+            )
+            self.assertIn(
+                '<summary class="nav-module">1.1.1 leaf_a1</summary>',
+                page,
+            )
+            self.assertIn(
+                '<summary class="nav-module">1.1.2 leaf_a2_u1</summary>',
+                page,
+            )
+            self.assertIn(
+                '<summary class="nav-module">1.2.1 leaf_a2_u2</summary>',
+                page,
+            )
+            self.assertNotIn("1.1 top/mid_a", page)
+            self.assertNotIn("nav-overview", page)
+            self.assertNotIn(">Overview<", page)
+            self.assertIn('href="#module-1-reg-1"', page)
+            self.assertIn('id="module-1-reg-1"', page)
+            self.assertIn("top_ctrl (0xF0000000)", page)
+            self.assertIn(
+                '<h3 class="register-title" id="module-1-reg-1">'
+                "top_ctrl (0xF0000000)</h3>",
+                page,
+            )
+            self.assertIn(
+                '<th class="meta-label">reg_name</th>'
+                '<td class="meta-value">top_ctrl</td>',
+                page,
+            )
+            self.assertNotIn(
+                '<td class="meta-value">top_ctrl (0xF0000000)</td>',
+                page,
+            )
+            self.assertIn("0xF0000000 ~ 0xF000FFFF", page)
+            self.assertIn("0xF0001000 ~ 0xF00017FF", page)
+            self.assertIn(">bytesize<", page)
+            self.assertIn(">0x800<", page)
+            self.assertIn(">block<", page)
+            self.assertIn(">1.1 mid_a<", page)
+            self.assertNotIn(">path<", page)
+            self.assertNotIn("top/mid_a", page)
+            self.assertNotIn(">source<", page)
+            self.assertNotIn(">base_address<", page)
+            self.assertIn(">address<", page)
+            self.assertIn(">0xF0001000<", page)
+            self.assertNotIn(">offset<", page)
+            self.assertIn("<summary>1.1 mid_a</summary>", page)
+            self.assertNotIn("<code>0xF0001000</code>", page)
+            self.assertIn('class="address-table"', page)
+            self.assertEqual(page.count('<col style="width:30ch">'), 3)
+
+    def test_tree_markdown_uses_absolute_addresses(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            run(
+                str(ROOT / "input" / "top_reg.md"),
+                temp,
+                nested=True,
+            )
+            tree = (Path(temp) / "doc" / "top_tree.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("| block", tree)
+            self.assertIn("| 1 top", tree)
+            self.assertIn("| 1.1 mid_a", tree)
+            self.assertIn("| 1.1.2 leaf_a2_u1", tree)
+            self.assertIn("| 1.2.1 leaf_a2_u2", tree)
+            self.assertNotIn("top/mid_a", tree)
+            self.assertNotIn("Base address:", tree)
+            self.assertNotIn("Source:", tree)
+            self.assertIn("| address", tree)
+            self.assertIn("| 0xF0000000 | top_ctrl", tree)
+            self.assertIn("| 0xF0001000 | mid_cfg", tree)
+            self.assertIn("| 0xF0001100 | ver", tree)
+
+    def test_tree_excel_uses_absolute_addresses(self) -> None:
+        try:
+            import openpyxl
+        except ImportError:
+            self.skipTest("openpyxl is unavailable")
+        with tempfile.TemporaryDirectory() as temp:
+            run(
+                str(ROOT / "input" / "top_reg.md"),
+                temp,
+                nested=True,
+            )
+            workbook = openpyxl.load_workbook(
+                Path(temp) / "doc" / "top_tree.xlsx",
+                read_only=True,
+                data_only=True,
+            )
+            try:
+                address_rows = list(workbook["address_map"].values)
+                self.assertEqual(
+                    address_rows[0],
+                    ("block", "address_range", "bytesize", "link"),
+                )
+                self.assertEqual(address_rows[2][0], "1.1 mid_a")
+                self.assertNotIn("top/mid_a", address_rows[2])
+                self.assertEqual(address_rows[4][0], "1.1.2 leaf_a2_u1")
+                self.assertEqual(address_rows[6][0], "1.2.1 leaf_a2_u2")
+                self.assertIn("1_1_2_leaf_a2_u1", workbook.sheetnames)
+                self.assertIn("1_2_1_leaf_a2_u2", workbook.sheetnames)
+
+                mid_rows = list(workbook["1_1_mid_a"].values)
+                self.assertEqual(mid_rows[0][0], "address")
+                self.assertEqual(mid_rows[1][0], "0xF0001000")
+                self.assertEqual(mid_rows[1][1], "mid_cfg")
+            finally:
+                workbook.close()
 
 
 if __name__ == "__main__":

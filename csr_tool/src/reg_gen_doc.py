@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Iterable
 
@@ -21,6 +22,8 @@ REG_HEADERS = [
     "special",
     "description",
 ]
+
+TREE_REG_HEADERS = ["address", *REG_HEADERS[1:]]
 
 
 class DocGenerator:
@@ -90,52 +93,72 @@ class DocGenerator:
         return "\n".join(parts)
 
     def tree_markdown(self) -> str:
+        nodes = self._document_nodes()
         lines = [
             f"# {self.module.name} Register Tree",
             "",
             "## Address Map",
             "",
             self._markdown_table(
-                ["path", "base_address", "bytesize", "source"],
+                ["block", "address_range", "bytesize"],
                 [
                     [
-                        "/".join(path),
-                        f"0x{base:X}",
-                        f"0x{module.local_size:X}",
-                        Path(module.source_path).name,
+                        f"{section_number} {display_name}",
+                        self._address_range(base, size),
+                        f"0x{size:X}",
                     ]
-                    for module, base, path in self.module.walk()
+                    for module, base, _, size, section_number, display_name in nodes
                 ],
             ),
         ]
-        for index, (module, base, path) in enumerate(self.module.walk(), start=1):
+        for module, base, _, _, section_number, display_name in nodes:
             lines.extend([
                 "",
-                f"## {index}. {'/'.join(path)}",
+                f"## {section_number} {display_name}",
                 "",
-                f"- Base address: `0x{base:X}`",
-                f"- Source: `{Path(module.source_path).name}`",
-                "",
-                self._markdown_table(REG_HEADERS, self._register_rows(module)),
+                self._markdown_table(
+                    TREE_REG_HEADERS,
+                    self._tree_register_rows(module, base),
+                ),
             ])
         return "\n".join(lines)
 
     def tree_html(self) -> str:
+        nodes = self._document_nodes()
         address_rows = []
         sections = []
-        for index, (module, base, path) in enumerate(self.module.walk(), start=1):
-            anchor = f"module-{index}"
+        navigation = [
+            '<a class="nav-address" href="#address-map">Address Map</a>'
+        ]
+        for module, base, path, size, section_number, display_name in nodes:
+            anchor = f"module-{section_number.replace('.', '-')}"
             address_rows.append([
-                f'<a href="#{anchor}">{html.escape("/".join(path))}</a>',
-                f"0x{base:X}",
-                f"0x{module.local_size:X}",
-                html.escape(Path(module.source_path).name),
+                f'<a href="#{anchor}">{section_number} '
+                f"{html.escape(display_name)}</a>",
+                self._address_range(base, size),
+                f"0x{size:X}",
             ])
+            register_links = "".join(
+                f'<a class="nav-register" '
+                f'href="#{anchor}-reg-{reg_index}">'
+                f"{html.escape(reg.name)} "
+                f"(0x{base + reg.offset:X})</a>"
+                for reg_index, reg in enumerate(module.registers, start=1)
+            )
+            navigation.append(
+                f'<details class="nav-module-group" '
+                f'style="--depth:{len(path) - 1}">'
+                f'<summary class="nav-module">'
+                f"{section_number} {html.escape(display_name)}</summary>"
+                f'<div class="nav-registers">'
+                f"{register_links}</div>"
+                "</details>"
+            )
             sections.append(
                 f'<details id="{anchor}" open>'
-                f"<summary>{index}. {html.escape('/'.join(path))} "
-                f"<code>0x{base:X}</code></summary>"
-                f"{self._html_table(REG_HEADERS, self._register_rows(module))}"
+                f"<summary>{section_number} "
+                f"{html.escape(display_name)}</summary>"
+                f"{self._html_register_tables(module, anchor, base)}"
                 "</details>"
             )
         return f"""<!doctype html>
@@ -145,21 +168,176 @@ class DocGenerator:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(self.module.name)} register tree</title>
 <style>
-body {{ font-family: Arial, sans-serif; margin: 24px; color: #202124; }}
+html {{ scroll-behavior: smooth; }}
+body {{ font-family: Arial, sans-serif; margin: 0; color: #202124; }}
+.page-shell {{
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  width: 100%;
+  min-width: 0;
+  min-height: 100vh;
+  transition: grid-template-columns 160ms ease;
+}}
+.page-shell.sidebar-collapsed {{ grid-template-columns: 52px minmax(0, 1fr); }}
+.sidebar {{
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 20px 16px;
+  background: #f3f5f7;
+  border-right: 1px solid #c9ced6;
+}}
+.sidebar-header {{ display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }}
+.sidebar-title {{ font-size: 18px; font-weight: 700; white-space: nowrap; }}
+.sidebar-toggle {{
+  display: inline-flex;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: #fff;
+  border: 1px solid #aeb6bf;
+  border-radius: 4px;
+  cursor: pointer;
+}}
+.sidebar-toggle:hover {{ background: #e3e8ed; }}
+.toggle-icon {{ position: relative; width: 16px; height: 14px; }}
+.toggle-icon span {{
+  position: absolute;
+  left: 0;
+  width: 16px;
+  height: 2px;
+  background: #26384a;
+  transition: transform 160ms ease, opacity 160ms ease, top 160ms ease;
+}}
+.toggle-icon span:nth-child(1) {{ top: 1px; }}
+.toggle-icon span:nth-child(2) {{ top: 6px; }}
+.toggle-icon span:nth-child(3) {{ top: 11px; }}
+.page-shell:not(.sidebar-collapsed) .toggle-icon span:nth-child(1) {{
+  top: 6px;
+  transform: rotate(45deg);
+}}
+.page-shell:not(.sidebar-collapsed) .toggle-icon span:nth-child(2) {{ opacity: 0; }}
+.page-shell:not(.sidebar-collapsed) .toggle-icon span:nth-child(3) {{
+  top: 6px;
+  transform: rotate(-45deg);
+}}
+.page-shell.sidebar-collapsed .sidebar {{ padding: 10px 8px; }}
+.page-shell.sidebar-collapsed .sidebar-title,
+.page-shell.sidebar-collapsed .sidebar nav {{ display: none; }}
+.sidebar nav {{ display: flex; flex-direction: column; min-width: 0; gap: 2px; }}
+.sidebar a {{
+  display: block;
+  color: #26384a;
+  padding: 6px 8px;
+  text-decoration: none;
+  border-left: 3px solid transparent;
+}}
+.sidebar a:hover {{ background: #e3e8ed; border-left-color: #4b6478; }}
+.nav-address {{ font-weight: 700; }}
+.nav-module-group {{ margin-left: calc(var(--depth) * 10px); }}
+.nav-module-group > summary {{
+  cursor: pointer;
+  color: #26384a;
+  font-weight: 600;
+}}
+.nav-module-group > summary::marker {{ color: #647789; }}
+.nav-module {{ padding: 6px 8px; font-weight: 600; }}
+.nav-registers {{ margin-left: 12px; }}
+.nav-register {{ font-family: Consolas, monospace; font-size: 13px; }}
+.content {{ min-width: 0; padding: 24px 28px; }}
+.table-scroll {{ max-width: 100%; overflow-x: auto; }}
+.address-table {{ table-layout: fixed; width: 90ch; }}
 table {{ border-collapse: collapse; width: 100%; margin: 12px 0 24px; }}
 th, td {{ border: 1px solid #c9ced6; padding: 7px 9px; text-align: left; }}
 th {{ background: #eef2f6; position: sticky; top: 0; }}
 tr:nth-child(even) {{ background: #f8fafc; }}
-details {{ border-top: 1px solid #c9ced6; padding: 12px 0; }}
-summary {{ cursor: pointer; font-size: 18px; font-weight: 600; }}
+.content > details {{
+  border-top: 1px solid #c9ced6;
+  padding: 12px 0;
+  overflow-x: auto;
+}}
+.content > details > summary {{ cursor: pointer; font-size: 18px; font-weight: 600; }}
 code {{ color: #14532d; }}
+.register-table {{ table-layout: fixed; width: 120ch; margin: 16px 0 28px; }}
+.register-section {{ margin: 16px 0 28px; }}
+.register-title {{ margin: 0 0 8px; font-size: 16px; font-weight: 700; }}
+.register-section .register-table {{ margin: 0; }}
+.register-table th {{ background: #b8b8b8; position: static; font-weight: 700; }}
+.register-table td {{ background: #fff; vertical-align: top; }}
+.register-table .field-description {{ white-space: pre-wrap; }}
+.content > details, #address-map {{ scroll-margin-top: 16px; }}
+.register-table {{ scroll-margin-top: 16px; }}
+@media (max-width: 900px) {{
+  .page-shell {{ grid-template-columns: 1fr; }}
+  .page-shell.sidebar-collapsed {{ grid-template-columns: 1fr; }}
+  .sidebar {{
+    position: sticky;
+    z-index: 10;
+    height: auto;
+    max-height: 38vh;
+    border-right: 0;
+    border-bottom: 1px solid #c9ced6;
+  }}
+  .sidebar nav {{ width: 100%; flex-direction: row; overflow-x: auto; }}
+  .nav-module-group {{ margin-left: 0; flex: 0 0 auto; }}
+  .nav-registers {{ display: none; }}
+  .content {{ padding: 18px 16px; }}
+}}
 </style>
 </head>
 <body>
+<div class="page-shell sidebar-collapsed">
+<aside class="sidebar">
+<div class="sidebar-header">
+<button class="sidebar-toggle" type="button" data-testid="sidebar-toggle"
+        aria-label="Expand navigation" title="Expand navigation">
+<span class="toggle-icon" aria-hidden="true">
+<span></span><span></span><span></span>
+</span>
+</button>
+<div class="sidebar-title">{html.escape(self.module.name)} Register Tree</div>
+</div>
+<nav>{''.join(navigation)}</nav>
+</aside>
+<main class="content">
 <h1>{html.escape(self.module.name)} Register Tree</h1>
-<h2>Address Map</h2>
-{self._html_table(["path", "base_address", "bytesize", "source"], address_rows, raw=True)}
+<h2 id="address-map">Address Map</h2>
+<div class="table-scroll">
+{self._html_table(
+    ["block", "address_range", "bytesize"],
+    address_rows,
+    raw=True,
+    table_class="address-table",
+    column_widths=["30ch", "30ch", "30ch"],
+)}
+</div>
 {''.join(sections)}
+</main>
+</div>
+<script>
+(function () {{
+  var shell = document.querySelector(".page-shell");
+  var button = document.querySelector(".sidebar-toggle");
+  function updateButton() {{
+    var collapsed = shell.classList.contains("sidebar-collapsed");
+    var label = collapsed ? "Expand navigation" : "Collapse navigation";
+    button.setAttribute("aria-label", label);
+    button.setAttribute("title", label);
+  }}
+  button.addEventListener("click", function () {{
+    shell.classList.toggle("sidebar-collapsed");
+    updateButton();
+  }});
+  updateButton();
+}}());
+</script>
 </body>
 </html>"""
 
@@ -195,6 +373,152 @@ code {{ color: #14532d; }}
                     field.description or (reg.description if first else ""),
                 ])
         return rows
+
+    def _tree_register_rows(
+        self,
+        module: ModuleModel,
+        absolute_base: int,
+    ) -> list[list[str]]:
+        rows = self._register_rows(module)
+        for row in rows:
+            if row[0]:
+                row[0] = f"0x{absolute_base + int(row[0], 0):X}"
+        return rows
+
+    def _html_register_tables(
+        self,
+        module: ModuleModel,
+        module_anchor: str,
+        absolute_base: int,
+    ) -> str:
+        tables: list[str] = []
+        for reg_index, reg in enumerate(module.registers, start=1):
+            rows = [
+                "<tr>"
+                '<th class="meta-label">reg_name</th>'
+                f'<td class="meta-value">{html.escape(reg.name)}</td>'
+                '<th class="meta-label">address</th>'
+                f'<td class="meta-value">'
+                f"0x{absolute_base + reg.offset:X}</td>"
+                "</tr>",
+                "<tr>"
+                '<th class="meta-label">reg_type</th>'
+                f'<td class="meta-value">{html.escape(reg.reg_type)}</td>'
+                '<th class="meta-label">special</th>'
+                f'<td class="meta-value">'
+                f"{html.escape(reg.special.to_text())}</td>"
+                "</tr>",
+                "<tr>"
+                '<th class="meta-label">SW_access</th>'
+                f'<td class="meta-value" colspan="3">'
+                f"{html.escape(reg.sw_access or '-')}</td>"
+                "</tr>",
+            ]
+            if reg.fields:
+                rows.append(
+                    "<tr>"
+                    '<th class="field-name">field</th>'
+                    '<th class="field-bit">bit_scope</th>'
+                    '<th class="field-default">default_value</th>'
+                    '<th class="field-description">description</th>'
+                    "</tr>"
+                )
+                for field in reg.fields:
+                    rows.append(
+                        "<tr>"
+                        f'<td class="field-name">{html.escape(field.name)}</td>'
+                        f'<td class="field-bit">[{field.msb}:{field.lsb}]</td>'
+                        f'<td class="field-default">'
+                        f"{html.escape(field.default_value)}</td>"
+                        f'<td class="field-description">'
+                        f"{html.escape(field.description or reg.description)}</td>"
+                        "</tr>"
+                    )
+            tables.append(
+                '<section class="register-section">'
+                f'<h3 class="register-title" '
+                f'id="{module_anchor}-reg-{reg_index}">'
+                f"{html.escape(reg.name)} "
+                f"(0x{absolute_base + reg.offset:X})</h3>"
+                f'<table class="register-table" '
+                f'data-register="{html.escape(reg.name)}">'
+                "<colgroup>"
+                '<col style="width:20ch">'
+                '<col style="width:20ch">'
+                '<col style="width:20ch">'
+                '<col style="width:60ch">'
+                "</colgroup>"
+                f"<tbody>{''.join(rows)}</tbody></table>"
+                "</section>"
+            )
+        return "".join(tables)
+
+    def _document_nodes(
+        self,
+    ) -> list[tuple[ModuleModel, int, tuple[str, ...], int, str, str]]:
+        raw_nodes: list[
+            tuple[ModuleModel, int, tuple[str, ...], int, str]
+        ] = []
+
+        def visit(
+            module: ModuleModel,
+            absolute_base: int,
+            path: tuple[str, ...],
+            allocated_size: int,
+            section_parts: tuple[int, ...],
+        ) -> None:
+            current_path = path + (module.name,)
+            section_number = ".".join(str(item) for item in section_parts)
+            raw_nodes.append(
+                (
+                    module,
+                    absolute_base,
+                    current_path,
+                    allocated_size,
+                    section_number,
+                )
+            )
+            for child_index, child in enumerate(module.sub_modules, start=1):
+                visit(
+                    child.module_obj,
+                    absolute_base + child.offset,
+                    current_path,
+                    child.bytesize,
+                    section_parts + (child_index,),
+                )
+
+        root_size = self.module.base_info.system_bytesize or self.module.local_size
+        visit(
+            self.module,
+            self.module.base_info.system_baseaddr,
+            (),
+            root_size,
+            (1,),
+        )
+        name_counts = Counter(module.name for module, _, _, _, _ in raw_nodes)
+        name_indexes: defaultdict[str, int] = defaultdict(int)
+        nodes = []
+        for module, base, path, size, section_number in raw_nodes:
+            name_indexes[module.name] += 1
+            display_name = module.name
+            if name_counts[module.name] > 1:
+                display_name = f"{module.name}_u{name_indexes[module.name]}"
+            nodes.append(
+                (
+                    module,
+                    base,
+                    path,
+                    size,
+                    section_number,
+                    display_name,
+                )
+            )
+        return nodes
+
+    @staticmethod
+    def _address_range(start: int, size: int) -> str:
+        end = start + max(1, size) - 1
+        return f"0x{start:X} ~ 0x{end:X}"
 
     def _write_module_excel(self, module: ModuleModel) -> Path | None:
         try:
@@ -236,25 +560,32 @@ code {{ color: #14532d; }}
         workbook = openpyxl.Workbook()
         map_sheet = workbook.active
         map_sheet.title = "address_map"
-        map_sheet.append(["path", "base_address", "bytesize", "source", "link"])
+        map_sheet.append(["block", "address_range", "bytesize", "link"])
         used_names = {"address_map"}
-        for index, (module, base, tree_path) in enumerate(self.module.walk(), start=1):
+        for (
+            module,
+            base,
+            _,
+            size,
+            section_number,
+            display_name,
+        ) in self._document_nodes():
             sheet_name = self._unique_sheet_name(
-                f"{index}_{module.name}", used_names
+                f"{section_number.replace('.', '_')}_{display_name}",
+                used_names,
             )
             sheet = workbook.create_sheet(sheet_name)
-            sheet.append(REG_HEADERS)
-            for row in self._register_rows(module):
+            sheet.append(TREE_REG_HEADERS)
+            for row in self._tree_register_rows(module, base):
                 sheet.append(row)
             map_sheet.append([
-                "/".join(tree_path),
-                f"0x{base:X}",
-                f"0x{module.local_size:X}",
-                Path(module.source_path).name,
+                f"{section_number} {display_name}",
+                self._address_range(base, size),
+                f"0x{size:X}",
                 f"Open {sheet_name}",
             ])
-            map_sheet.cell(map_sheet.max_row, 5).hyperlink = f"#'{sheet_name}'!A1"
-            map_sheet.cell(map_sheet.max_row, 5).style = "Hyperlink"
+            map_sheet.cell(map_sheet.max_row, 4).hyperlink = f"#'{sheet_name}'!A1"
+            map_sheet.cell(map_sheet.max_row, 4).style = "Hyperlink"
         self._style_workbook(workbook)
         workbook.save(path)
         return path
@@ -305,7 +636,11 @@ code {{ color: #14532d; }}
 
     @staticmethod
     def _html_table(
-        headers: list[str], rows: Iterable[list[str]], raw: bool = False
+        headers: list[str],
+        rows: Iterable[list[str]],
+        raw: bool = False,
+        table_class: str = "",
+        column_widths: list[str] | None = None,
     ) -> str:
         def cell(value: str) -> str:
             return str(value) if raw else html.escape(str(value))
@@ -314,4 +649,16 @@ code {{ color: #14532d; }}
             "<tr>" + "".join(f"<td>{cell(item)}</td>" for item in row) + "</tr>"
             for row in rows
         )
-        return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
+        class_attr = (
+            f' class="{html.escape(table_class)}"' if table_class else ""
+        )
+        colgroup = ""
+        if column_widths:
+            colgroup = "<colgroup>" + "".join(
+                f'<col style="width:{html.escape(width)}">'
+                for width in column_widths
+            ) + "</colgroup>"
+        return (
+            f"<table{class_attr}>{colgroup}<thead><tr>{head}</tr></thead>"
+            f"<tbody>{body}</tbody></table>"
+        )

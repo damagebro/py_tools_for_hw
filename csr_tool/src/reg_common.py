@@ -32,6 +32,26 @@ C_KEYWORDS = {
     "unsigned", "void", "volatile", "while", "_Bool", "_Complex", "_Imaginary",
 }
 
+VHDL_KEYWORDS = {
+    "abs", "access", "after", "alias", "all", "and", "architecture",
+    "array", "assert", "assume", "assume_guarantee", "attribute", "begin",
+    "block", "body", "buffer", "bus", "case", "component", "configuration",
+    "constant", "context", "cover", "default", "disconnect", "downto",
+    "else", "elsif", "end", "entity", "exit", "fairness", "file", "for",
+    "force", "function", "generate", "generic", "group", "guarded", "if",
+    "impure", "in", "inertial", "inout", "is", "label", "library",
+    "linkage", "literal", "loop", "map", "mod", "nand", "new", "next",
+    "nor", "not", "null", "of", "on", "open", "or", "others", "out",
+    "package", "parameter", "port", "postponed", "procedure", "process",
+    "property", "protected", "pure", "range", "record", "register", "reject",
+    "release", "rem", "report", "restrict", "restrict_guarantee", "return",
+    "rol", "ror", "select", "sequence", "severity", "shared", "signal",
+    "sla", "sll", "sra", "srl", "strong", "subtype", "then", "to",
+    "transport", "type", "unaffected", "units", "until", "use", "variable",
+    "view", "vmode", "vprop", "vunit", "wait", "while", "with", "xnor",
+    "xor",
+}
+
 IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -97,7 +117,9 @@ def validate_identifier(name: str, label: str, include_c: bool = True) -> str:
         raise CSRValidationError(
             f"{label}: '{name}' is not a valid identifier"
         )
-    reserved = SV_KEYWORDS | (C_KEYWORDS if include_c else set())
+    reserved = SV_KEYWORDS | VHDL_KEYWORDS | (
+        C_KEYWORDS if include_c else set()
+    )
     if lowered in reserved or keyword.iskeyword(lowered):
         raise CSRValidationError(f"{label}: '{name}' is a reserved keyword")
     return lowered
