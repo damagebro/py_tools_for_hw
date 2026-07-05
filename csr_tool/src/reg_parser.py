@@ -1,445 +1,586 @@
-import os
-from typing import Dict, List, Any
-try:
-    from .models import ModuleModel, RegisterModel, FieldModel, SubModuleInstance, BaseInfo
-except ImportError:
-    from models import ModuleModel, RegisterModel, FieldModel, SubModuleInstance, BaseInfo
+from __future__ import annotations
+
+import json
+from collections import Counter, defaultdict
+from pathlib import Path
+from typing import Any
+
+from .models import (
+    BaseInfoModel,
+    FieldModel,
+    ModuleModel,
+    RegisterModel,
+    SpecialOptions,
+    SubModuleNode,
+)
+from .reg_common import (
+    CSRValidationError,
+    expand_defaults,
+    parse_int,
+    parse_optional_int,
+    parse_special,
+    validate_identifier,
+)
+
+
+REQUIRED_COLUMNS = {
+    "offset",
+    "reg_name",
+    "field",
+    "msb",
+    "lsb",
+    "sw_access",
+    "default_value",
+    "reg_type",
+    "special",
+    "description",
+}
+
+TYPE_ACCESS = {
+    "cfg": "RW",
+    "status": "RO",
+    "cmd": "W1T",
+    "toggle": "W1T",
+    "irq": "W1C",
+    "slave": "",
+    "mem": "",
+}
+
+BASE_ALIASES = {
+    "system_addr": "system_baseaddr",
+    "system_base_addr": "system_baseaddr",
+    "system_size": "system_bytesize",
+    "system_byte_size": "system_bytesize",
+}
+
 
 class CSRParser:
-    """
-    Parses Markdown-based register definitions without external dependencies.
-    Supports Single Module and Nested (Recursive) modes.
-    Enforces Rule 7 (monotonically increasing offsets) and Rule 8 (bytesize limits).
-    """
-    def __init__(self, root_excel: str, nested: bool = False):
-        self.root_excel = os.path.abspath(root_excel)
+    def __init__(self, input_path: str, nested: bool = False):
+        self.input_path = Path(input_path).resolve()
         self.nested = nested
-        self.module_cache: Dict[str, ModuleModel] = {}
+        self._active_paths: list[Path] = []
 
-    def parse(self, file_path: str = None, base_addr: int = 0, max_bytesize: int = None) -> ModuleModel:
-        if file_path is None:
-            file_path = self.root_excel
-        
-        print(f"[*] Parsing Markdown: {file_path} (Base: {hex(base_addr)})")
-        
-        module = self._parse_markdown(file_path, base_addr, max_bytesize)
-        
-        # Rule 8 check: Ensure sub-module doesn't exceed allocated bytesize
-        if max_bytesize is not None and module.registers:
-            last_reg = module.registers[-1]
-            repeat_count = 1
-            for part in last_reg.special.split(','):
-                part = part.strip()
-                if part.startswith('repeat'):
-                    try:
-                        repeat_count = int(part.split()[1])
-                    except ValueError:
-                        pass
-            
-            # The total size used by this module
-            total_size_used = (last_reg.offset - base_addr) + (repeat_count * (module.base_info.reg_bitwidth // 8))
-            if total_size_used > max_bytesize:
-                error_msg = (
-                    f"Address Space Exceeded Error in {module.name}:\n"
-                    f"  Total size used ({hex(total_size_used)}) exceeds allocated bytesize ({hex(max_bytesize)}).\n"
-                    f"  Last register info:\n"
-                    f"    reg_name: {last_reg.name}\n"
-                    f"    offset: {hex(last_reg.offset - base_addr)}\n"
-                    f"    reg_type: {last_reg.reg_type}\n"
-                    f"    special: {last_reg.special}\n"
-                )
-                raise ValueError(error_msg)
-                
-        return module
+    def parse(self) -> ModuleModel:
+        return self._parse_file(self.input_path, None)
 
-    def _read_excel_to_md(self, file_path: str) -> List[str]:
+    def _parse_file(self, path: Path, allocated_size: int | None) -> ModuleModel:
+        path = path.resolve()
+        if not path.exists():
+            raise FileNotFoundError(f"Input file not found: {path}")
+        if path in self._active_paths:
+            chain = " -> ".join(item.name for item in self._active_paths + [path])
+            raise CSRValidationError(f"Recursive slave reference detected: {chain}")
+
+        self._active_paths.append(path)
         try:
-            import openpyxl
-        except ImportError:
-            raise ImportError("openpyxl is required to parse .xlsx files. Please install it (e.g., pip install openpyxl).")
-        
-        wb = openpyxl.load_workbook(file_path, data_only=True)
-        lines = []
-        
-        if 'reg_define' in wb.sheetnames:
-            if 'base_info' in wb.sheetnames:
-                lines.append("# base_info\n")
-                ws_base = wb['base_info']
-                for row in ws_base.iter_rows(values_only=True):
-                    if not any(cell is not None and str(cell).strip() != '' for cell in row):
-                        continue
-                    row_strs = [str(cell).strip() if cell is not None else "" for cell in row]
-                    lines.append("| " + " | ".join(row_strs) + " |\n")
-            
-            lines.append("# reg_define\n")
-            ws_reg = wb['reg_define']
-            for row in ws_reg.iter_rows(values_only=True):
-                if not any(cell is not None and str(cell).strip() != '' for cell in row):
-                    continue
-                row_strs = [str(cell).strip() if cell is not None else "" for cell in row]
-                lines.append("| " + " | ".join(row_strs) + " |\n")
-        else:
-            ws = wb.active
-            for row in ws.iter_rows(values_only=True):
-                if not any(cell is not None and str(cell).strip() != '' for cell in row):
-                    continue
-                
-                row_strs = [str(cell).strip() if cell is not None else "" for cell in row]
-                
-                if row_strs[0].startswith('#'):
-                    lines.append(row_strs[0] + "\n")
-                else:
-                    lines.append("| " + " | ".join(row_strs) + " |\n")
-                
-        return lines
+            base_data, register_rows = self._load_input(path)
+            module = ModuleModel(
+                name=validate_identifier(
+                    ModuleModel.clean_name(str(path)),
+                    f"{path.name} module name",
+                    include_c=False,
+                ),
+                source_path=str(path),
+                base_info=self._parse_base_info(base_data, path),
+            )
+            self._parse_registers(module, register_rows)
+            limit = allocated_size
+            if module.base_info.system_bytesize is not None:
+                limit = min(
+                    item for item in (limit, module.base_info.system_bytesize)
+                    if item is not None
+                )
+            if limit is not None and module.local_size > limit:
+                last = module.registers[-1]
+                raise CSRValidationError(
+                    f"{path.name}: address space 0x{module.local_size:X} exceeds "
+                    f"allocated size 0x{limit:X}; last register "
+                    f"'{last.raw_name}' at offset 0x{last.offset:X}"
+                )
+            if self.nested:
+                self._load_children(module, path)
+            return module
+        finally:
+            self._active_paths.pop()
 
-    def _parse_markdown(self, file_path: str, base_addr: int, max_bytesize: int = None) -> ModuleModel:
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"File not found: {file_path}")
-
-        if file_path.endswith('.xlsx'):
-            lines = self._read_excel_to_md(file_path)
-            content = "".join(lines)
-        else:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-
-        sections = {}
-        current_section = None
-        for line in content.split('\n'):
-            line = line.strip()
-            if line.startswith('#'):
-                current_section = line.lstrip('#').strip().lower()
-                sections[current_section] = []
-            elif current_section:
-                sections[current_section].append(line)
-
-        module = ModuleModel(
-            name=os.path.basename(file_path).split('.')[0],
-            base_address=base_addr,
-            excel_path=file_path
+    def _load_input(self, path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        suffix = path.suffix.lower()
+        if suffix == ".md":
+            return self._load_markdown(path)
+        if suffix == ".xlsx":
+            return self._load_excel(path)
+        if suffix == ".json":
+            return self._load_json(path)
+        raise CSRValidationError(
+            f"{path.name}: unsupported input format '{path.suffix}'"
         )
 
-        # 1. Parse base_info
-        if 'base_info' in sections:
-            base_rows = self._extract_table_rows(sections['base_info'])
-            if base_rows:
-                info_dict = {row[0]: row[1] for row in base_rows if len(row) >= 2}
-                module.base_info.reg_bitwidth = int(info_dict.get('reg_bitwidth', 32))
-                module.base_info.author = str(info_dict.get('author', ''))
-                module.base_info.email = str(info_dict.get('email', ''))
-                
-                if 'system_baseaddr' in info_dict:
-                    val = info_dict['system_baseaddr']
-                    module.base_info.system_baseaddr = int(val.replace('_', ''), 16) if val.startswith('0x') else int(val.replace('_', ''))
-                if 'system_bytesize' in info_dict:
-                    val = info_dict['system_bytesize']
-                    module.base_info.system_bytesize = int(val.replace('_', ''), 16) if val.startswith('0x') else int(val.replace('_', ''))
-                if 'system_prefix' in info_dict:
-                    module.base_info.system_prefix = str(info_dict['system_prefix'])
+    def _load_markdown(
+        self, path: Path
+    ) -> tuple[dict[str, str], list[dict[str, str]]]:
+        sections: dict[str, list[str]] = {}
+        current = ""
+        for line in path.read_text(encoding="utf-8-sig").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                current = stripped.lstrip("#").strip().lower()
+                sections.setdefault(current, [])
+            elif current:
+                sections[current].append(line)
 
-        if module.base_info.system_baseaddr is not None:
-            base_addr += module.base_info.system_baseaddr
-            module.base_address = base_addr
-            
-        if module.base_info.system_bytesize is not None:
-            if max_bytesize is None:
-                max_bytesize = module.base_info.system_bytesize
-            else:
-                max_bytesize = min(max_bytesize, module.base_info.system_bytesize)
+        if "reg_define" not in sections:
+            raise CSRValidationError(f"{path.name}: missing '# reg_define' section")
+        base_headers, base_rows = self._parse_md_table(
+            sections.get("base_info", []),
+            path,
+            "base_info",
+            required=False,
+        )
+        reg_headers, reg_rows = self._parse_md_table(
+            sections["reg_define"],
+            path,
+            "reg_define",
+            required=True,
+        )
+        base_data = {
+            row[base_headers[0]]: row[base_headers[1]]
+            for row in base_rows
+            if row.get(base_headers[0], "")
+        } if len(base_headers) >= 2 else {}
+        return base_data, [
+            {key.lower(): value for key, value in row.items()}
+            for row in reg_rows
+        ]
 
-        # 2. Parse reg_define
-        if 'reg_define' in sections:
-            reg_rows, headers = self._extract_table_rows_with_headers(sections['reg_define'])
-            if reg_rows:
-                self._process_registers(module, reg_rows, headers, base_addr, max_bytesize)
-
-        return module
-
-    def _extract_table_rows(self, lines: List[str]) -> List[List[str]]:
-        rows = []
-        headers_found = False
+    def _parse_md_table(
+        self,
+        lines: list[str],
+        path: Path,
+        section: str,
+        required: bool,
+    ) -> tuple[list[str], list[dict[str, str]]]:
+        raw_rows: list[list[str]] = []
         for line in lines:
-            line = line.strip()
-            if not line.startswith('|'):
+            stripped = line.strip()
+            if not stripped.startswith("|"):
                 continue
-            parts = [p.strip() for p in line.split('|')][1:-1]
-            if all(set(p).issubset({'-', ':', ' '}) for p in parts):
+            cells = [item.strip() for item in stripped.strip("|").split("|")]
+            if all(set(item) <= {"-", ":", " "} for item in cells):
                 continue
-            if not headers_found:
-                headers_found = True
-                continue
-            rows.append(parts)
-        return rows
-
-    def _extract_table_rows_with_headers(self, lines: List[str]) -> (List[List[str]], List[str]):
-        rows = []
-        headers = []
-        for line in lines:
-            line = line.strip()
-            if not line.startswith('|'):
-                continue
-            parts = [p.strip() for p in line.split('|')][1:-1]
-            if all(set(p).issubset({'-', ':', ' '}) for p in parts):
-                continue
-            if not headers:
-                headers = parts
-            else:
-                rows.append(parts)
-        return rows, headers
-
-    def _process_registers(self, module: ModuleModel, rows: List[List[str]], headers: List[str], base_addr: int, max_bytesize: int = None):
-        h_idx = {h: i for i, h in enumerate(headers)}
-        
-        # Pre-pass to count frequencies of reg_names
-        name_freq = {}
-        for row in rows:
-            if len(row) > h_idx.get('reg_name', -1) and 'reg_name' in h_idx:
-                r_name = row[h_idx['reg_name']].strip()
-                if r_name:
-                    name_freq[r_name] = name_freq.get(r_name, 0) + 1
-
-        last_reg_name = ""
-        last_reg_type = ""
-        last_special = ""
-        
-        reg_counts = {}
-        def deduplicate_name(name):
-            if not name: return name
-            if name_freq.get(name, 0) > 1:
-                reg_counts[name] = reg_counts.get(name, 0) + 1
-                return f"{name}{reg_counts[name]}"
-            return name
-
-        registers_data = []
-        current_reg = None
-        
-        last_offset = -1
-        expected_next_offset = 0
-        valid_types = ['cfg', 'status', 'cmd', 'irq', 'slave', 'mem']
-
-        max_addr_used = 0
-
-        for row in rows:
-            while len(row) < len(headers):
-                row.append('')
-            
-            offset_raw = row[h_idx['offset']] if 'offset' in h_idx else ''
-            reg_name_raw = row[h_idx['reg_name']] if 'reg_name' in h_idx else ''
-            
-            is_new_reg = bool(offset_raw) or bool(reg_name_raw)
-            
-            if is_new_reg:
-                if reg_name_raw: last_reg_name = reg_name_raw
-                
-                type_raw = row[h_idx['reg_type']] if 'reg_type' in h_idx else ''
-                if type_raw: last_reg_type = type_raw
-                
-                special_raw = row[h_idx['special']] if 'special' in h_idx else ''
-                if special_raw: last_special = special_raw
-                
-                # Calculate offset and enforce Rule 7
-                if offset_raw:
-                    offset_val = int(offset_raw, 16) if '0x' in offset_raw.lower() else int(offset_raw)
-                    if last_offset >= 0 and offset_val <= last_offset:
-                        prev_reg = registers_data[-1] if registers_data else None
-                        error_msg = f"Address Error in {module.name}:\n  Offset {hex(offset_val)} is not strictly increasing.\n"
-                        if prev_reg:
-                            error_msg += (
-                                f"  Previous register info:\n"
-                                f"    reg_name: {prev_reg['raw_name']}\n"
-                                f"    offset: {hex(prev_reg['offset'] - base_addr)}\n"
-                                f"    reg_type: {prev_reg['reg_type']}\n"
-                                f"    special: {prev_reg['special']}\n"
-                            )
-                        error_msg += (
-                            f"  Current register info:\n"
-                            f"    reg_name: {reg_name_raw}\n"
-                            f"    offset: {hex(offset_val)}\n"
-                            f"    reg_type: {type_raw}\n"
-                            f"    special: {special_raw}\n"
-                        )
-                        raise ValueError(error_msg)
-                    if expected_next_offset > 0 and offset_val < expected_next_offset:
-                        prev_reg = registers_data[-1]
-                        error_msg = (
-                            f"Address Overlap Error in {module.name}:\n"
-                            f"  Current register '{reg_name_raw}' at offset {hex(offset_val)} overlaps with previous register.\n"
-                            f"  Previous register info:\n"
-                            f"    reg_name: {prev_reg['raw_name']}\n"
-                            f"    offset: {hex(prev_reg['offset'] - base_addr)}\n"
-                            f"    reg_type: {prev_reg['reg_type']}\n"
-                            f"    special: {prev_reg['special']}\n"
-                            f"    expected next available offset: {hex(expected_next_offset)}\n"
-                            f"  Current register info:\n"
-                            f"    reg_name: {reg_name_raw}\n"
-                            f"    offset: {hex(offset_val)}\n"
-                            f"    reg_type: {type_raw}\n"
-                            f"    special: {special_raw}\n"
-                        )
-                        raise ValueError(error_msg)
-                else:
-                    offset_val = expected_next_offset
-                
-                last_offset = offset_val
-                
-                # Calculate expected next offset based on repeat or bytesize
-                repeat_count = 1
-                bytesize = None
-                for part in last_special.split(','):
-                    part = part.strip()
-                    if part.startswith('repeat'):
-                        try:
-                            repeat_count = int(part.split()[1])
-                        except ValueError:
-                            pass
-                    elif part.startswith('bytesize='):
-                        try:
-                            bytesize_str = part.split('=')[1].strip()
-                            bytesize = int(bytesize_str, 16) if '0x' in bytesize_str.lower() else int(bytesize_str)
-                        except ValueError:
-                            pass
-                
-                if last_reg_type in ['slave', 'mem'] and bytesize is not None:
-                    expected_next_offset = offset_val + bytesize
-                else:
-                    expected_next_offset = offset_val + (repeat_count * (module.base_info.reg_bitwidth // 8))
-                
-                if expected_next_offset > max_addr_used:
-                    max_addr_used = expected_next_offset
-                
-                unique_name = deduplicate_name(last_reg_name)
-                
-                reg_type = last_reg_type.lower()
-                if reg_type not in valid_types:
-                    print(f"[Warning] Invalid reg_type: {reg_type} at offset {hex(offset_val)}. Expected one of {valid_types}")
-
-                current_reg = {
-                    'name': unique_name,
-                    'raw_name': last_reg_name,
-                    'offset': base_addr + offset_val,
-                    'reg_type': reg_type,
-                    'special': last_special,
-                    'fields': []
-                }
-                registers_data.append(current_reg)
-
-            # Add field
-            field_name = row[h_idx['field']] if 'field' in h_idx else ''
-            if field_name:
-                msb_raw = row[h_idx['msb']] if 'msb' in h_idx else '0'
-                lsb_raw = row[h_idx['lsb']] if 'lsb' in h_idx else '0'
-                sw_access = row[h_idx['SW_access']] if 'SW_access' in h_idx else ''
-                default_val = row[h_idx['default_value']] if 'default_value' in h_idx else ''
-                desc = row[h_idx['description']] if 'description' in h_idx else ''
-                
-                field = FieldModel(
-                    name=field_name,
-                    msb=int(msb_raw) if msb_raw.isdigit() else 0,
-                    lsb=int(lsb_raw) if lsb_raw.isdigit() else 0,
-                    sw_access=sw_access,
-                    default_value=default_val,
-                    description=desc
+            raw_rows.append(cells)
+        if not raw_rows:
+            if required:
+                raise CSRValidationError(
+                    f"{path.name}: section '{section}' has no table"
                 )
-                if current_reg:
-                    current_reg['fields'].append(field)
+            return [], []
+        headers = raw_rows[0]
+        rows = []
+        for row_index, cells in enumerate(raw_rows[1:], start=1):
+            cells += [""] * (len(headers) - len(cells))
+            rows.append({
+                **dict(zip(headers, cells[: len(headers)])),
+                "__row__": str(row_index),
+            })
+        return headers, rows
 
-        if max_bytesize is not None and max_addr_used > max_bytesize:
-            last_reg = registers_data[-1] if registers_data else None
-            error_msg = (
-                f"Address Space Exceeded Error in {module.name}:\n"
-                f"  Total address space used ({hex(max_addr_used)}) exceeds allocated bytesize ({hex(max_bytesize)}).\n"
+    def _load_excel(
+        self, path: Path
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        try:
+            import openpyxl
+        except ImportError as exc:
+            raise ImportError(
+                "openpyxl is required for .xlsx input"
+            ) from exc
+        workbook = openpyxl.load_workbook(path, data_only=True, read_only=True)
+        if "reg_define" not in workbook.sheetnames:
+            raise CSRValidationError(
+                f"{path.name}: workbook requires a 'reg_define' sheet"
             )
-            if last_reg:
-                error_msg += (
-                    f"  Last register info:\n"
-                    f"    reg_name: {last_reg['raw_name']}\n"
-                    f"    offset: {hex(last_reg['offset'] - base_addr)}\n"
-                    f"    reg_type: {last_reg['reg_type']}\n"
-                    f"    special: {last_reg['special']}\n"
+        base_data: dict[str, Any] = {}
+        if "base_info" in workbook.sheetnames:
+            rows = list(workbook["base_info"].iter_rows(values_only=True))
+            for row in rows[1:]:
+                if row and row[0] not in (None, ""):
+                    base_data[str(row[0]).strip()] = row[1] if len(row) > 1 else ""
+        reg_values = list(workbook["reg_define"].iter_rows(values_only=True))
+        if not reg_values:
+            raise CSRValidationError(f"{path.name}: 'reg_define' sheet is empty")
+        headers = [str(item or "").strip().lower() for item in reg_values[0]]
+        register_rows = []
+        for row_index, values in enumerate(reg_values[1:], start=1):
+            if not any(item not in (None, "") for item in values):
+                continue
+            padded = list(values) + [""] * (len(headers) - len(values))
+            register_rows.append({
+                **dict(zip(headers, padded[: len(headers)])),
+                "__row__": row_index,
+            })
+        return base_data, register_rows
+
+    def _load_json(
+        self, path: Path
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+        if "module" in data:
+            data = data["module"]
+        base_data = data.get("base_info", {})
+        rows = data.get("reg_define", data.get("registers", []))
+        if not isinstance(base_data, dict) or not isinstance(rows, list):
+            raise CSRValidationError(
+                f"{path.name}: JSON requires base_info object and reg_define list"
+            )
+        normalized = []
+        for row_index, row in enumerate(rows, start=1):
+            if "fields" in row:
+                special_value = row.get("special", "")
+                if isinstance(special_value, dict):
+                    special_value = SpecialOptions(**special_value).to_text()
+                for field_index, item in enumerate(row.get("fields") or [{}]):
+                    normalized.append({
+                        "offset": row.get("offset", "") if field_index == 0 else "",
+                        "reg_name": row.get("raw_name", row.get("name", ""))
+                        if field_index == 0 else "",
+                        "field": item.get("name", ""),
+                        "msb": item.get("msb", ""),
+                        "lsb": item.get("lsb", ""),
+                        "sw_access": item.get(
+                            "sw_access", row.get("sw_access", "")
+                        ),
+                        "default_value": item.get(
+                            "default_value",
+                            item.get("default_values", ""),
+                        ),
+                        "reg_type": row.get("reg_type", "")
+                        if field_index == 0 else "",
+                        "special": special_value
+                        if field_index == 0 else "",
+                        "description": item.get(
+                            "description", row.get("description", "")
+                        ),
+                        "__row__": row_index,
+                    })
+            else:
+                normalized.append({
+                    **{str(key).lower(): value for key, value in row.items()},
+                    "__row__": row_index,
+                })
+        return base_data, normalized
+
+    def _parse_base_info(
+        self, data: dict[str, Any], path: Path
+    ) -> BaseInfoModel:
+        normalized = {
+            BASE_ALIASES.get(str(key).strip().lower(), str(key).strip().lower()): value
+            for key, value in data.items()
+        }
+        known = {
+            "reg_bitwidth",
+            "system_baseaddr",
+            "system_bytesize",
+            "system_prefix",
+            "author",
+            "email",
+        }
+        bitwidth = parse_int(
+            normalized.get("reg_bitwidth", 32),
+            f"{path.name} reg_bitwidth",
+        )
+        if bitwidth < 8 or bitwidth > 64 or bitwidth % 8:
+            raise CSRValidationError(
+                f"{path.name}: reg_bitwidth must be 8..64 and byte aligned"
+            )
+        return BaseInfoModel(
+            reg_bitwidth=bitwidth,
+            system_baseaddr=parse_optional_int(
+                normalized.get("system_baseaddr", 0),
+                f"{path.name} system_baseaddr",
+            ) or 0,
+            system_bytesize=parse_optional_int(
+                normalized.get("system_bytesize"),
+                f"{path.name} system_bytesize",
+            ),
+            system_prefix=str(normalized.get("system_prefix", "")).strip().lower(),
+            author=str(normalized.get("author", "")).strip(),
+            email=str(normalized.get("email", "")).strip(),
+            extras={
+                key: str(value)
+                for key, value in normalized.items()
+                if key not in known
+            },
+        )
+
+    def _parse_registers(
+        self, module: ModuleModel, rows: list[dict[str, Any]]
+    ) -> None:
+        if not rows:
+            raise CSRValidationError(f"{Path(module.source_path).name}: no registers")
+        columns = {str(key).lower() for key in rows[0] if not str(key).startswith("__")}
+        missing = REQUIRED_COLUMNS - columns
+        if missing:
+            raise CSRValidationError(
+                f"{Path(module.source_path).name}: missing columns: "
+                + ", ".join(sorted(missing))
+            )
+
+        raw_registers: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
+        current_header: dict[str, Any] | None = None
+        current_fields: list[dict[str, Any]] = []
+        for row in rows:
+            offset = self._cell(row, "offset")
+            name = self._cell(row, "reg_name")
+            if offset or name:
+                if current_header is not None:
+                    raw_registers.append((current_header, current_fields))
+                current_header = row
+                current_fields = []
+            elif current_header is None:
+                raise CSRValidationError(
+                    f"{Path(module.source_path).name} row {row.get('__row__')}: "
+                    "field row appears before a register"
                 )
-            raise ValueError(error_msg)
+            if self._cell(row, "field"):
+                current_fields.append(row)
+        if current_header is not None:
+            raw_registers.append((current_header, current_fields))
 
-        # Infer missing bytesize for slave/mem
-        for i, reg_data in enumerate(registers_data):
-            if reg_data['reg_type'] in ['slave', 'mem']:
-                has_bytesize = False
-                for part in reg_data['special'].split(','):
-                    if part.strip().startswith('bytesize='):
-                        has_bytesize = True
-                        break
-                
-                if not has_bytesize:
-                    if i + 1 < len(registers_data):
-                        next_offset = registers_data[i+1]['offset'] - base_addr
-                        inferred_bytesize = next_offset - (reg_data['offset'] - base_addr)
-                    else:
-                        if max_bytesize is not None:
-                            inferred_bytesize = max_bytesize - (reg_data['offset'] - base_addr)
-                        else:
-                            inferred_bytesize = None
-                    
-                    if inferred_bytesize is not None:
-                        if reg_data['special'] and reg_data['special'] != '-':
-                            reg_data['special'] += f", bytesize=0x{inferred_bytesize:X}"
-                        else:
-                            reg_data['special'] = f"bytesize=0x{inferred_bytesize:X}"
+        name_totals = Counter(
+            self._cell(header, "reg_name").lower()
+            for header, _ in raw_registers
+        )
+        name_indexes: defaultdict[str, int] = defaultdict(int)
+        next_offset = 0
+        previous: RegisterModel | None = None
 
-        for reg_data in registers_data:
+        for header, field_rows in raw_registers:
+            row_number = int(header.get("__row__", 0))
+            raw_name = self._cell(header, "reg_name")
+            if not raw_name:
+                raise CSRValidationError(
+                    f"{Path(module.source_path).name} row {row_number}: "
+                    "reg_name is required for a new register"
+                )
+            base_name = validate_identifier(
+                raw_name,
+                f"{Path(module.source_path).name} row {row_number} reg_name",
+            )
+            name_indexes[base_name] += 1
+            unique_name = (
+                f"{base_name}{name_indexes[base_name]}"
+                if name_totals[base_name] > 1 else base_name
+            )
+            offset_text = self._cell(header, "offset")
+            offset = (
+                parse_int(offset_text, f"{raw_name} offset")
+                if offset_text else next_offset
+            )
+            if offset % module.word_bytes:
+                raise CSRValidationError(
+                    f"{raw_name}: offset 0x{offset:X} is not aligned to "
+                    f"{module.word_bytes} bytes"
+                )
+            if previous is not None and offset < next_offset:
+                raise CSRValidationError(
+                    f"Address overlap: '{raw_name}' at 0x{offset:X}; previous "
+                    f"'{previous.raw_name}' at 0x{previous.offset:X} ends at "
+                    f"0x{next_offset - 1:X}"
+                )
+
+            reg_type = self._cell(header, "reg_type").lower()
+            if reg_type == "toggle":
+                reg_type = "cmd"
+            if reg_type not in TYPE_ACCESS:
+                raise CSRValidationError(
+                    f"{raw_name}: reg_type '{reg_type}' is invalid"
+                )
+            access = self._cell(header, "sw_access").upper()
+            expected_access = TYPE_ACCESS[reg_type]
+            if access and access != expected_access:
+                raise CSRValidationError(
+                    f"{raw_name}: SW_access must be {expected_access or 'empty'} "
+                    f"for reg_type={reg_type}"
+                )
+            access = expected_access
+            special = parse_special(
+                self._cell(header, "special"),
+                f"{raw_name} special",
+            )
+            self._validate_special(raw_name, reg_type, special)
+
             reg = RegisterModel(
-                name=reg_data['name'],
-                offset=reg_data['offset'],
-                reg_type=reg_data['reg_type'],
-                special=reg_data['special'],
-                description=""
+                name=unique_name,
+                raw_name=raw_name,
+                offset=offset,
+                reg_type=reg_type,
+                sw_access=access,
+                special=special,
+                description=self._cell(header, "description"),
+                source_row=row_number,
             )
-            reg.fields = reg_data['fields']
-            module.registers.append(reg)
-
-            if reg.reg_type == 'slave':
-                special_parts = [p.strip() for p in reg.special.split(',')]
-                slv_filename = ""
-                for part in special_parts:
-                    if part.startswith('slv_filename='):
-                        slv_filename = part.split('=')[1].strip()
-                        break
-                
-                if not slv_filename:
-                    raise ValueError(f"Error in {module.name}: reg_type='slave' but no 'slv_filename' specified in special column for register '{reg.name}'.")
-                
-                sub_path = os.path.join(os.path.dirname(module.excel_path), slv_filename)
-                if not os.path.exists(sub_path):
-                    raise FileNotFoundError(f"Error in {module.name}: slv_filename '{slv_filename}' not found at {sub_path} for register '{reg.name}'.")
-
-                if self.nested:
-                    self._handle_slave(module, reg)
-
-    def _handle_slave(self, module: ModuleModel, reg: RegisterModel):
-        special_parts = [p.strip() for p in reg.special.split(',')]
-        slv_filename = ""
-        bytesize = None
-        
-        for part in special_parts:
-            if part.startswith('slv_filename='):
-                slv_filename = part.split('=')[1].strip()
-            elif part.startswith('bytesize='):
-                try:
-                    bytesize_str = part.split('=')[1].strip()
-                    bytesize = int(bytesize_str, 16) if '0x' in bytesize_str.lower() else int(bytesize_str)
-                except ValueError:
-                    pass
-        
-        if slv_filename:
-            sub_path = os.path.join(os.path.dirname(module.excel_path), slv_filename)
-            if os.path.exists(sub_path):
-                module.is_leaf = False
-                sub_inst = SubModuleInstance(
-                    instance_name=reg.name,
-                    module_name=os.path.basename(slv_filename).split('.')[0],
-                    offset=reg.offset,
-                    excel_path=sub_path,
-                    bytesize=bytesize
+            if reg_type not in {"slave", "mem"}:
+                if not field_rows:
+                    raise CSRValidationError(f"{raw_name}: at least one field is required")
+                reg.fields = self._parse_fields(module, reg, field_rows)
+            elif field_rows:
+                raise CSRValidationError(
+                    f"{raw_name}: {reg_type} entries must not define fields"
                 )
-                # Pass bytesize down to enforce Rule 8
-                sub_inst.module_obj = self.parse(sub_path, base_addr=sub_inst.offset, max_bytesize=bytesize)
-                module.sub_modules.append(sub_inst)
+
+            module.registers.append(reg)
+            previous = reg
+            size = reg.byte_size(module.word_bytes)
+            next_offset = offset + size
+
+        self._infer_region_sizes(module)
+        self._validate_shadow_depths(module)
+
+    def _parse_fields(
+        self,
+        module: ModuleModel,
+        reg: RegisterModel,
+        rows: list[dict[str, Any]],
+    ) -> list[FieldModel]:
+        fields: list[FieldModel] = []
+        used_bits = 0
+        names: set[str] = set()
+        for row in rows:
+            row_number = int(row.get("__row__", 0))
+            name = validate_identifier(
+                self._cell(row, "field"),
+                f"{reg.raw_name} row {row_number} field",
+            )
+            if name in names:
+                raise CSRValidationError(
+                    f"{reg.raw_name}: duplicate field '{name}'"
+                )
+            names.add(name)
+            msb = parse_int(self._cell(row, "msb"), f"{reg.raw_name}.{name} msb")
+            lsb = parse_int(self._cell(row, "lsb"), f"{reg.raw_name}.{name} lsb")
+            if lsb < 0 or msb < lsb or msb >= module.base_info.reg_bitwidth:
+                raise CSRValidationError(
+                    f"{reg.raw_name}.{name}: invalid bit range [{msb}:{lsb}] "
+                    f"for width {module.base_info.reg_bitwidth}"
+                )
+            mask = ((1 << (msb - lsb + 1)) - 1) << lsb
+            if used_bits & mask:
+                raise CSRValidationError(
+                    f"{reg.raw_name}.{name}: bit range [{msb}:{lsb}] overlaps "
+                    "another field"
+                )
+            used_bits |= mask
+            row_access = self._cell(row, "sw_access").upper()
+            if row_access and row_access != reg.sw_access:
+                raise CSRValidationError(
+                    f"{reg.raw_name}.{name}: SW_access {row_access} differs "
+                    f"from register access {reg.sw_access}"
+                )
+            width = msb - lsb + 1
+            fields.append(FieldModel(
+                name=name,
+                msb=msb,
+                lsb=lsb,
+                sw_access=reg.sw_access,
+                default_values=expand_defaults(
+                    self._cell(row, "default_value"),
+                    reg.repeat,
+                    width,
+                    f"{reg.raw_name}.{name} default_value",
+                ),
+                description=self._cell(row, "description"),
+            ))
+        return fields
+
+    def _validate_special(
+        self, name: str, reg_type: str, special: SpecialOptions
+    ) -> None:
+        if special.extras:
+            raise CSRValidationError(
+                f"{name}: unsupported special option(s): "
+                + ", ".join(special.extras)
+            )
+        if special.shadow and reg_type != "cfg":
+            raise CSRValidationError(
+                f"{name}: shadow is only valid for reg_type=cfg"
+            )
+        if reg_type == "slave" and not special.slv_filename:
+            raise CSRValidationError(
+                f"{name}: reg_type=slave requires slv_filename"
+            )
+        if reg_type != "slave" and special.slv_filename:
+            raise CSRValidationError(
+                f"{name}: slv_filename is only valid for reg_type=slave"
+            )
+        if reg_type == "mem" and special.bytesize is None:
+            raise CSRValidationError(
+                f"{name}: reg_type=mem requires bytesize"
+            )
+        if reg_type not in {"slave", "mem"} and special.bytesize is not None:
+            raise CSRValidationError(
+                f"{name}: bytesize is only valid for slave or mem"
+            )
+        if reg_type in {"slave", "mem"} and special.repeat != 1:
+            raise CSRValidationError(
+                f"{name}: repeat is not supported for slave or mem"
+            )
+
+    def _infer_region_sizes(self, module: ModuleModel) -> None:
+        for index, reg in enumerate(module.registers):
+            if reg.reg_type not in {"slave", "mem"}:
+                continue
+            if reg.special.bytesize is None:
+                if index + 1 < len(module.registers):
+                    reg.special.bytesize = (
+                        module.registers[index + 1].offset - reg.offset
+                    )
+                elif module.base_info.system_bytesize is not None:
+                    reg.special.bytesize = (
+                        module.base_info.system_bytesize - reg.offset
+                    )
+                else:
+                    raise CSRValidationError(
+                        f"{reg.raw_name}: bytesize cannot be inferred; set "
+                        "bytesize or system_bytesize"
+                    )
+            if reg.special.bytesize <= 0:
+                raise CSRValidationError(
+                    f"{reg.raw_name}: inferred bytesize must be positive"
+                )
+
+    def _validate_shadow_depths(self, module: ModuleModel) -> None:
+        depths = {
+            reg.special.shadow
+            for reg in module.registers
+            if reg.special.shadow >= 2
+        }
+        if len(depths) > 1:
+            raise CSRValidationError(
+                f"{module.name}: all shadow N depths >= 2 must match"
+            )
+
+    def _load_children(self, module: ModuleModel, parent_path: Path) -> None:
+        for reg in module.registers:
+            if reg.reg_type != "slave":
+                continue
+            child_path = (parent_path.parent / reg.special.slv_filename).resolve()
+            if not child_path.exists():
+                raise FileNotFoundError(
+                    f"{reg.raw_name}: slave file not found: {child_path}"
+                )
+            child = self._parse_file(child_path, reg.special.bytesize)
+            module.sub_modules.append(SubModuleNode(
+                instance_name=reg.name,
+                offset=reg.offset,
+                bytesize=reg.special.bytesize or 0,
+                source_path=str(child_path),
+                module_obj=child,
+            ))
+
+    @staticmethod
+    def _cell(row: dict[str, Any], name: str) -> str:
+        value = row.get(name, "")
+        if value is None:
+            return ""
+        if isinstance(value, list):
+            return ",".join(str(item) for item in value)
+        return str(value).strip()

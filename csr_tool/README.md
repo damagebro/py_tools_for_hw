@@ -1,6 +1,6 @@
 # CSR Autogen Tool
 
-CSR Autogen Tool 是一款轻量级的寄存器自动化生成工具。它通过解析基于 Markdown、Excel 或 JSON 编写的寄存器描述文件，自动生成多种格式的文档（Markdown, HTML, Excel；JSON 输入时额外生成 JSON），并支持未来扩展生成 RTL 代码、UVM Testbench 以及 Firmware C Header。
+CSR Autogen Tool 是一款轻量级的寄存器自动化生成工具。它解析 Markdown、Excel 或 JSON 寄存器描述，生成文档、SystemVerilog RTL、自检 Testbench、UVM RAL 模型以及 Firmware C Header。
 
 ## 1. 运行指南 (Usage)
 
@@ -14,6 +14,9 @@ python3 src/autogen_reg.py -i input/top_reg.md
 
 # 嵌套模式 (Nested)：解析顶层模块并递归展开所有子模块，生成树形结构的文档
 python3 src/autogen_reg.py -i input/top_reg.md --nested
+
+# 等价写法
+python3 src/autogen_reg.py -i input/top_reg.md -m nested -o out
 ```
 
 ```bash
@@ -120,12 +123,21 @@ def traverse_tree(module: ModuleModel, depth=0):
 - `*_gen.xlsx`: Excel 格式的寄存器定义（需 `openpyxl`）。
 - `*_gen.json`: 仅当输入文件是 `.json` 时生成。
 
+同时生成：
+- `out/rtl/${block}.sv` 与 `out/rtl/plus/` 下的 typedef、wrapper、集成模板。
+- `out/tb/${block}_tb.sv` 自检 Testbench。
+- `out/tb/${block}_ral_pkg.sv` UVM RAL 模型。
+
 **Nested 模式输出格式**：
 除了生成各个单模块的上述文件外，还会额外生成包含全局地址映射的树形文档：
 - `*_tree.md`: 包含全局 Address Map 和所有子模块的 Markdown 文档。
 - `*_tree.xlsx`: 包含 Sheet 导航栏的完整 Excel 文档（需 `openpyxl`）。
 - `*_tree.html`: 包含全局 Address Map 和所有子模块展开的完整 HTML 文档（需 `jinja2`）。
 - `*_tree.json`: 仅当输入文件是 `.json` 时生成，包含完整寄存器树结构的 JSON 数据。
+
+嵌套模式还会在 `out/firmware/` 生成 `*_all_reg_addr.h` 和
+`*_all_reg_type.h`。前者提供 offset、默认值和绝对地址宏，后者仅包含
+寄存器 union/struct 类型声明，不分配静态存储空间。
 
 ## 6. 硬件 CSR 与 RTL 生成说明
 

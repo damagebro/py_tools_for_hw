@@ -1,71 +1,87 @@
+from __future__ import annotations
+
 import argparse
-import os
 import sys
+from pathlib import Path
 
-# Add the project root to sys.path to allow imports from .models, etc.
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-try:
-    from src.reg_parser import CSRParser
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from src.reg_common import CSRValidationError
     from src.reg_gen_doc import DocGenerator
+    from src.reg_gen_firmware import generate_firmware
     from src.reg_gen_rtl import generate_rtl
     from src.reg_gen_tb import generate_tb
-    from src.reg_gen_firmware import generate_firmware
-except ImportError:
-    from reg_parser import CSRParser
-    from reg_gen_doc import DocGenerator
-    from reg_gen_rtl import generate_rtl
-    from reg_gen_tb import generate_tb
-    from reg_gen_firmware import generate_firmware
+    from src.reg_parser import CSRParser
+else:
+    from .reg_common import CSRValidationError
+    from .reg_gen_doc import DocGenerator
+    from .reg_gen_firmware import generate_firmware
+    from .reg_gen_rtl import generate_rtl
+    from .reg_gen_tb import generate_tb
+    from .reg_parser import CSRParser
 
-def main():
-    parser = argparse.ArgumentParser(description="CSR Autogen Tool")
-    parser.add_argument("-i", "--input", required=True, help="Input register definition file (.md)")
-    parser.add_argument("--nested", action="store_true", help="Generate nested tree structures")
-    parser.add_argument("-o", "--outdir", default="csr_tool/out", help="Output directory")
 
-    args = parser.parse_args()
+def build_argument_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Generate CSR RTL, testbench, documentation, and firmware headers."
+    )
+    parser.add_argument(
+        "-i",
+        "--input",
+        required=True,
+        help="Input register definition (.md, .xlsx, or .json)",
+    )
+    parser.add_argument(
+        "-o",
+        "--outdir",
+        default="out",
+        help="Output directory (default: out)",
+    )
+    parser.add_argument(
+        "-m",
+        "--mode",
+        choices=("single", "nested"),
+        default="single",
+        help="Generation mode (default: single)",
+    )
+    parser.add_argument(
+        "--nested",
+        action="store_true",
+        help="Compatibility alias for --mode nested",
+    )
+    return parser
 
-    input_path = os.path.abspath(args.input)
-    if not os.path.exists(input_path):
-        print(f"[!] Input file not found: {input_path}")
-        sys.exit(1)
 
-    print(f"[*] Input: {input_path}")
-    if args.nested:
-        print(f"[*] Mode: nested")
-    else:
-        print(f"[*] Mode: single")
+def run(input_path: str, outdir: str, nested: bool) -> list[Path]:
+    source = Path(input_path).resolve()
+    output = Path(outdir).resolve()
+    module = CSRParser(str(source), nested=nested).parse()
+    generated: list[Path] = []
+    generated.extend(
+        DocGenerator(module, str(output / "doc")).generate_all(is_nested=nested)
+    )
+    generated.extend(generate_rtl(module, str(output / "rtl")))
+    generated.extend(generate_tb(module, str(output / "tb")))
+    generated.extend(
+        generate_firmware(module, str(output / "firmware"), is_nested=nested)
+    )
+    return generated
 
-    # 1. Parsing
-    parser_obj = CSRParser(input_path, nested=args.nested)
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_argument_parser().parse_args(argv)
+    nested = args.nested or args.mode == "nested"
     try:
-        module = parser_obj.parse()
-        print(f"[*] Parsing successful: {module.name}")
-    except Exception as e:
-        print(f"[!] Parsing failed: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+        generated = run(args.input, args.outdir, nested)
+    except (CSRValidationError, FileNotFoundError, ImportError, OSError) as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        return 1
+    print(
+        f"[OK] Generated {len(generated)} files in "
+        f"{Path(args.outdir).resolve()}"
+    )
+    return 0
 
-    # 2. Documentation Generation
-    doc_out_dir = os.path.join(args.outdir, "doc")
-    doc_gen = DocGenerator(module, doc_out_dir)
-    doc_gen.generate_all(is_nested=args.nested)
-
-    # 3. RTL Generation
-    rtl_out_dir = os.path.join(args.outdir, "rtl")
-    generate_rtl(module, rtl_out_dir)
-
-    # 4. Testbench Generation
-    tb_out_dir = os.path.join(args.outdir, "tb")
-    generate_tb(module, tb_out_dir)
-
-    # 5. Firmware Generation
-    fw_out_dir = os.path.join(args.outdir, "firmware")
-    generate_firmware(module, fw_out_dir, is_nested=args.nested)
-
-    print(f"\n[*] All tasks completed. Outputs in {args.outdir}/")
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
