@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import html
-import json
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Iterable
 
 from .models import ModuleModel, RegisterModel
-from .reg_common import write_json, write_text
+from .reg_common import write_text
 
 
 REG_HEADERS = [
@@ -55,14 +54,6 @@ class DocGenerator:
         if excel is not None:
             generated.append(excel)
 
-        source_suffix = Path(self.module.source_path).suffix.lower()
-        if source_suffix == ".json":
-            json_path = self.out_dir / (
-                f"{self.module.name}_tree.json"
-                if is_nested else f"{self.module.name}_gen.json"
-            )
-            write_json(json_path, self.module.to_dict())
-            generated.append(json_path)
         return generated
 
     def module_markdown(self, module: ModuleModel) -> str:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
@@ -109,8 +108,6 @@ class CSRParser:
             return self._load_markdown(path)
         if suffix == ".xlsx":
             return self._load_excel(path)
-        if suffix == ".json":
-            return self._load_json(path)
         raise CSRValidationError(
             f"{path.name}: unsupported input format '{path.suffix}'"
         )
@@ -218,55 +215,6 @@ class CSRParser:
                 "__row__": row_index,
             })
         return base_data, register_rows
-
-    def _load_json(
-        self, path: Path
-    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        data = json.loads(path.read_text(encoding="utf-8-sig"))
-        if "module" in data:
-            data = data["module"]
-        base_data = data.get("base_info", {})
-        rows = data.get("reg_define", data.get("registers", []))
-        if not isinstance(base_data, dict) or not isinstance(rows, list):
-            raise CSRValidationError(
-                f"{path.name}: JSON requires base_info object and reg_define list"
-            )
-        normalized = []
-        for row_index, row in enumerate(rows, start=1):
-            if "fields" in row:
-                special_value = row.get("special", "")
-                if isinstance(special_value, dict):
-                    special_value = SpecialOptions(**special_value).to_text()
-                for field_index, item in enumerate(row.get("fields") or [{}]):
-                    normalized.append({
-                        "offset": row.get("offset", "") if field_index == 0 else "",
-                        "reg_name": row.get("raw_name", row.get("name", ""))
-                        if field_index == 0 else "",
-                        "field": item.get("name", ""),
-                        "msb": item.get("msb", ""),
-                        "lsb": item.get("lsb", ""),
-                        "sw_access": item.get(
-                            "sw_access", row.get("sw_access", "")
-                        ),
-                        "default_value": item.get(
-                            "default_value",
-                            item.get("default_values", ""),
-                        ),
-                        "reg_type": row.get("reg_type", "")
-                        if field_index == 0 else "",
-                        "special": special_value
-                        if field_index == 0 else "",
-                        "description": item.get(
-                            "description", row.get("description", "")
-                        ),
-                        "__row__": row_index,
-                    })
-            else:
-                normalized.append({
-                    **{str(key).lower(): value for key, value in row.items()},
-                    "__row__": row_index,
-                })
-        return base_data, normalized
 
     def _parse_base_info(
         self, data: dict[str, Any], path: Path

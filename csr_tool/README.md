@@ -1,204 +1,384 @@
 # CSR Autogen Tool
 
-CSR Autogen Tool 是一款轻量级的寄存器自动化生成工具。它解析 Markdown、Excel 或 JSON 寄存器描述，生成文档、SystemVerilog RTL、自检 Testbench、UVM RAL 模型以及 Firmware C Header。
+CSR Autogen Tool 是一款轻量级寄存器自动化生成工具。它解析 Markdown 或
+Excel 寄存器定义，生成文档、SystemVerilog RTL、自检 Testbench、
+UVM RAL 模型以及 Firmware C Header。
 
-## 1. 运行指南 (Usage)
+## 1. 工具概览
 
-环境要求：Python 3.x。
-可选依赖：`jinja2` (用于生成高级 HTML), `openpyxl` (用于生成/解析 Excel)。
-即使不安装可选依赖，工具依然可以正常运行并生成基础的 Markdown 文件。
+主要能力：
+
+- 支持 `.md`、`.xlsx` 两种输入格式。
+- 支持单模块生成和多层级寄存器树展开。
+- 自动检查地址重叠、字段重叠、位宽、访问属性和保留关键字。
+- 生成 Markdown、HTML 和 Excel 寄存器文档。
+- 生成 CSR RTL、typedef、struct wrapper 和集成模板。
+- 生成自检 Testbench、UVM RAL 和 Firmware C Header。
+- 自动计算 nested 模式下的绝对地址和全局 Address Map。
+
+章节导航：
+
+| 章节 | 内容                                  |
+| :--- | :------------------------------------ |
+| 2    | 安装、快速运行和格式转换              |
+| 3    | 输入表格、寄存器类型和校验规则        |
+| 4    | single/nested 两种生成模式            |
+| 5    | `out/` 下各类生成文件                 |
+| 6    | CSR bus、DFF 边界、shadow 和 RTL 结构 |
+| 7    | 常见问题与当前限制                    |
+| 8    | 内部模型、代码模块和二次开发          |
+
+## 2. 安装与快速开始
+
+### 2.1 环境与依赖
+
+要求 Python 3。建议在工具目录下安装依赖：
 
 ```bash
-# 默认模式 (Single)：仅解析并输出当前指定的单个模块
-python3 src/autogen_reg.py -i input/top_reg.md
-
-# 嵌套模式 (Nested)：解析顶层模块并递归展开所有子模块，生成树形结构的文档
-python3 src/autogen_reg.py -i input/top_reg.md --nested
-
-# 等价写法
-python3 src/autogen_reg.py -i input/top_reg.md -m nested -o out
+python -m pip install -r requirements.txt
 ```
+
+`openpyxl` 用于读取和生成 Excel。未安装时，Markdown、HTML、RTL 和 TB
+仍可生成，但 Excel 输入不可解析，Excel 输出会被跳过。
+
+查看命令行参数：
 
 ```bash
-# 将 input/*.md 转换为 input/xlsx/*.xlsx
-python3 input/xlsx/convert_md2xlsx.py
-
-# 以 Excel 作为输入运行嵌套模式
-python3 src/autogen_reg.py -i input/xlsx/top_reg.xlsx --nested
+python src/autogen_reg.py --help
 ```
+
+### 2.2 最小示例
+
+生成单个模块：
 
 ```bash
-# 将 input/*.md 转换为 input/json/*.json
-python3 input/json/convert_md2json.py
-
-# 以 JSON 作为输入运行嵌套模式，并输出 JSON 文档
-python3 src/autogen_reg.py -i input/json/top_reg.json --nested
+python src/autogen_reg.py -i input/leaf_a1_reg.md -m single -o out
 ```
 
-如果正在用 Excel/WPS 打开 `input/xlsx/*.xlsx`，转换脚本可能无法覆盖对应文件，需要先关闭表格后再重新转换。
+从顶层递归生成完整寄存器树：
 
-## 2. 寄存器定义规范 (single 模式)
-
-**填表方式与规则**：
-1. **文件格式**：推荐使用 Markdown 表格格式（也支持 Excel）。包含两个主要部分：`# base_info` 和 `# reg_define`。
-2. **base_info (选填)**：定义模块的基础信息，如 `reg_bitwidth`（通常为32）、`system_baseaddr`、`system_bytesize` 等。如果不填，工具会使用默认值。
-3. **reg_define**：定义寄存器列表。包含 `offset`, `reg_name`, `field`, `msb`, `lsb`, `SW_access`, `default_value`, `reg_type`, `special`, `description` 等列。
-4. **寄存器类型 (`reg_type`) 与读写属性 (`SW_access`) 绑定关系**：
-   - `cfg`, SW_access=RW: 配置寄存器（软件可读写，硬件只读）。
-   - `status`, SW_access=RO: 状态寄存器（硬件可写，软件只读）。
-   - `toggle`, SW_access=W1T: 翻转触发寄存器（用于软件向硬件发送命令，硬件检测翻转产生脉冲）。
-   - `irq`, SW_access=W1C: 中断寄存器（写1清0，用于中断状态清除等）。
-   - `slave`, SW_access=留空: 子模块占位符（配合 `special` 列使用，用于嵌套模式）。
-   - `mem`, SW_access=留空: 内存空间占位符（表示一段连续的 SRAM/Memory 空间）。
-5. **特殊属性 (`special`)**：用于定义高级行为，多个属性用逗号分隔：
-   - `slv_filename=xxx.md`: 仅当 `reg_type=slave` 时有效，指定子模块的定义文件路径。
-   - `bytesize=0x...`: 指定 `slave` 或 `mem` 占用的地址空间大小。如果不填，工具会自动推导。
-   - `repeat N`: 表示该寄存器（或配置组）连续重复 N 次，工具会自动分配地址空间。
-     `default_value` 支持用 CSV 逗号分隔方式为每个 repeat 实例填写不同默认值；如果填写数量少于 N，后续实例沿用最后一个默认值。例如 `repeat 4` 且 `default_value=0x12,12` 时，默认值展开为 `[0]=0x12`, `[1]=12`, `[2]=12`, `[3]=12`。
-   - `shadow` / `shadow N`: 仅对 `reg_type=cfg` 有效。硬件使用 working_reg 工作时，软件可以提前更新 shadow_reg，从而掩盖下一组配置的写入延时；`shadow N` 用 FIFO 机制维护 N 份 working_reg。
-6. **填写技巧**：
-   - `offset` 可以留空：工具会自动根据上一个寄存器的地址和位宽推导当前地址。
-   - `reg_name` 可以重复：工具会自动去重并编号（如 `name1`, `name2`）。
-7. **规则约束**：
-   - `offset` 必须单向递增，不能重叠。
-   - 字段的 `msb` 和 `lsb` 必须在 `reg_bitwidth` 范围内，且同一寄存器内的字段不能重叠。
-   - `description` 列用于填写寄存器或字段的详细描述。
-
-## 3. 系统级集成与地址映射 (nested 模式)
-
-当使用 `--nested` 参数时，工具会从顶层模块开始，根据 `special` 列中的 `slv_filename=xxx.md` 递归解析所有子模块。
-
-**嵌套模式核心功能**：
-- **全局地址映射 (Address Map)**：自动计算并展示整个系统的地址分配树。
-- **地址推导与校验**：自动推导未明确指定 `bytesize` 的子模块的地址空间，并严格校验各个子模块之间是否发生地址重叠 (Overlap) 或超出父节点分配的空间。
-
-## 4. 架构设计与二次开发 (Developer Guide)
-
-本工具的核心在于将非结构化的文本表格转换为结构化的内存对象，方便后续的 RTL/TB/FW 生成。
-
-**核心数据结构 (`src/models.py`)**：
-- `BaseInfoModel`: 存储模块的基础信息（基地址、位宽等）。
-- `FieldModel`: 存储单个寄存器字段的信息（msb, lsb, 读写属性等）。
-- `RegisterModel`: 存储单个寄存器的信息，包含一个 `FieldModel` 列表。
-- `SubModuleNode`: 用于构建树形结构，包含子模块的实例化信息（如 `bytesize`）和指向子模块 `ModuleModel` 的指针。
-- `ModuleModel`: 核心模块节点，包含 `BaseInfoModel`、`RegisterModel` 列表以及 `SubModuleNode` 列表。
-
-**单模块 Register 与 Field 遍历示例 (Single 模式)**：
-在生成单模块的 RTL 或 C Header 时，可以直接遍历 `registers` 和 `fields`：
-
-```python
-def traverse_module_regs(module: ModuleModel):
-    print(f"Module: {module.name}")
-    for reg in module.registers:
-        print(f"  Reg: {reg.name} [Offset: {hex(reg.offset)}, Type: {reg.reg_type}]")
-        for field in reg.fields:
-            print(f"    Field: {field.name} [{field.msb}:{field.lsb}] - {field.sw_access} - Default: {field.default_value}")
+```bash
+python src/autogen_reg.py -i input/top_reg.md -m nested -o out
 ```
 
-**Tree 结构遍历示例 (Nested 模式)**：
-在生成全局文档或集成 RTL 时，可以通过递归遍历 `ModuleModel` 的 `sub_modules` 来访问整个寄存器树：
+`--nested` 是 `--mode nested` 的兼容别名：
 
-```python
-def traverse_tree(module: ModuleModel, depth=0):
-    print("  " * depth + f"Module: {module.name}")
-    for reg in module.registers:
-        print("  " * (depth + 1) + f"Reg: {reg.name} at {reg.offset}")
-
-    for sub_node in module.sub_modules:
-        # 递归遍历子模块
-        traverse_tree(sub_node.module_obj, depth + 1)
+```bash
+python src/autogen_reg.py -i input/top_reg.md --nested -o out
 ```
 
-## 5. 输入输出文件格式
+### 2.3 输入格式转换
 
-**输入格式**：
-支持以下三种格式作为输入：
-- `.md`: Markdown 表格格式（推荐，纯文本易于版本控制）。
-- `.xlsx`: Excel 格式（方便表格编辑）。
-- `.json`: JSON 格式（方便与其他工具链交互）。
+将 `input/*.md` 转换为 Excel：
 
-**Single 模式输出格式**：
-运行后，在 `out/doc/` 目录下会生成当前模块文档：
-- `*_gen.md`: 格式化对齐的 Markdown 文档。
-- `*_gen.xlsx`: Excel 格式的寄存器定义（需 `openpyxl`）。
-- `*_gen.json`: 仅当输入文件是 `.json` 时生成。
+```bash
+python input/xlsx/convert_md2xlsx.py
+python src/autogen_reg.py -i input/xlsx/top_reg.xlsx -m nested -o out
+```
 
-同时生成：
-- `out/rtl/${block}.sv` 与 `out/rtl/plus/` 下的 typedef、wrapper、集成模板。
-- `out/tb/${block}_tb.sv` 自检 Testbench。
-- `out/tb/${block}_ral_pkg.sv` UVM RAL 模型。
+## 3. 输入定义规范
 
-**Nested 模式输出格式**：
-除了生成各个单模块的上述文件外，还会额外生成包含全局地址映射的树形文档：
-- `*_tree.md`: 包含全局 Address Map 和所有子模块的 Markdown 文档。
-- `*_tree.xlsx`: 包含 Sheet 导航栏的完整 Excel 文档（需 `openpyxl`）。
-- `*_tree.html`: 包含全局 Address Map 和所有子模块展开的完整 HTML 文档（需 `jinja2`）。
-- `*_tree.json`: 仅当输入文件是 `.json` 时生成，包含完整寄存器树结构的 JSON 数据。
+推荐使用 Markdown。纯文本便于评审、差异比较和版本控制；Excel 适合表格编辑，
+也适合非开发人员维护寄存器表。
 
-嵌套模式还会在 `out/firmware/` 生成 `*_all_reg_addr.h` 和
-`*_all_reg_type.h`。前者提供 offset、默认值和绝对地址宏，后者仅包含
-寄存器 union/struct 类型声明，不分配静态存储空间。
+### 3.1 base_info
 
-## 6. 硬件 CSR 与 RTL 生成说明
+输入文件包含 `base_info` 和 `reg_define` 两部分。常用基础配置如下：
 
-硬件 CSR 的目标是把软件可见的寄存器访问，转换成 RTL 内部稳定、清晰、可集成的控制/状态接口。`csr_tool` 当前支持生成单模块 CSR RTL，主输出位于 `out/rtl/${block}.sv`。`block`由输入模块名规范为小写，实际生成的RTL模块名和文件名也使用小写。大多数用户只需要直接使用这个主文件；增强辅助文件放在 `out/rtl/plus/`，包括 typedef、struct wrapper 和集成模板。
+| 配置                | 说明                      |
+| :------------------ | :------------------------ |
+| `reg_bitwidth`      | CSR 数据宽度，默认 32     |
+| `system_baseaddr`   | 根模块系统基地址          |
+| `system_bytesize`   | 根模块地址空间大小        |
+| `system_prefix`     | Firmware 绝对地址宏前缀   |
+| `author`、`email`   | 文档元信息                |
 
-### 6.1 csr_bus 接口特点
+### 3.2 reg_define
 
-当前 CSR bus 采用“请求通道 + 读响应通道”的轻量协议：
+寄存器表包含以下列：
+
+| 列名              | 说明                                      |
+| :---------------- | :---------------------------------------- |
+| `offset`          | 模块内相对地址；留空时自动推导            |
+| `reg_name`        | 寄存器、slave 或 mem 名称                 |
+| `field`           | 字段名称                                  |
+| `msb`、`lsb`      | 字段位范围                                |
+| `SW_access`       | 软件访问属性                              |
+| `default_value`   | 字段默认值                                |
+| `reg_type`        | 寄存器类型                                |
+| `special`         | repeat、shadow、bytesize 或子模块文件     |
+| `description`     | 寄存器或字段说明                          |
+
+一个寄存器有多个字段时，后续字段行可以留空 `offset` 和 `reg_name`。同一模块
+中重复的 `reg_name` 会按出现顺序自动添加编号。
+
+#### 3.2.1 reg_type 与 SW_access
+
+| reg_type        | SW_access | DFF 所在位置 | 用途                         |
+| :-------------- | :-------- | :----------- | :--------------------------- |
+| `cfg`           | `RW`      | autogen RTL  | 软件配置、硬件读取           |
+| `status`        | `RO`      | user RTL     | 硬件状态、软件读取           |
+| `cmd`/`toggle`  | `W1T`     | autogen RTL  | 写 1 翻转命令状态            |
+| `irq`           | `W1C`     | user RTL     | 读取中断状态并产生清除脉冲   |
+| `slave`         | 留空      | 子模块       | 引用下一级寄存器定义         |
+| `mem`           | 留空      | 外部存储     | 保留连续地址区间             |
+
+`toggle` 输入会在内部归一化为 `cmd`。
+
+#### 3.2.2 special 属性
+
+多个属性使用逗号分隔：
+
+- `slv_filename=xxx.md`：`slave` 引用的子模块定义文件。
+- `bytesize=0x...`：`slave` 或 `mem` 占用的地址空间。
+- `repeat N`：连续生成 N 个寄存器实例。
+- `shadow` / `shadow 1`：一份 shadow 和一份 working 配置。
+- `shadow N`：一份 shadow 和 N 份 FIFO working 配置。
+
+`repeat N` 的 `default_value` 支持 CSV。若默认值数量少于 N，后续实例沿用
+最后一个值。例如 `repeat 4` 配合 `0x12,12` 会展开为
+`[0]=0x12, [1]=12, [2]=12, [3]=12`。
+
+### 3.3 输入检查
+
+工具会拒绝以下输入：
+
+- offset 未按 CSR word bytes 对齐。
+- 寄存器、slave 或 mem 地址范围发生重叠。
+- 子模块实际地址空间超过父模块分配的 `bytesize`。
+- 字段超出 `reg_bitwidth` 或同一寄存器内字段重叠。
+- `reg_type` 与 `SW_access` 不匹配。
+- `special` 用于不支持的寄存器类型。
+- nested 引用形成递归环。
+- 模块、寄存器或字段名称命中 Python、C、SystemVerilog 或 VHDL 保留关键字。
+
+## 4. 生成模式
+
+### 4.1 single 模式
+
+single 是默认模式，只解析指定文件：
+
+```bash
+python src/autogen_reg.py -i input/leaf_a2_reg.md -o out
+```
+
+适合单模块开发、局部验证和回灌生成的 `*_gen.md`/`*_gen.xlsx`。寄存器 offset
+保持模块内相对地址，不递归加载 `slv_filename`。
+
+### 4.2 nested 模式
+
+nested 从顶层文件开始，递归解析每个 `slave` 的 `slv_filename`：
+
+```bash
+python src/autogen_reg.py -i input/top_reg.md -m nested -o out
+```
+
+该模式会：
+
+- 按 `system_baseaddr` 和每层 slave offset 计算绝对地址。
+- 为每一级 block 生成 Address Map。
+- 检查父子地址空间和 sibling 区域是否冲突。
+- 为每个唯一 source block 生成 RTL、TB 和 RAL。
+- 允许同一 source block 在树中实例化多次。
+- 对重复 block 实例使用 `_u1`、`_u2` 等唯一名称展示文档和 Firmware 地址。
+
+## 5. 输出文件说明
+
+默认输出目录为 `out/`。
+
+### 5.1 文档 `out/doc/`
+
+single 模式：
+
+| 文件                 | 内容                         |
+| :------------------- | :--------------------------- |
+| `<block>_gen.md`     | 格式化后的单模块定义         |
+| `<block>_gen.xlsx`   | 单模块 Excel 文档            |
+
+nested 模式还会生成：
+
+| 文件                | 内容                                  |
+| :------------------ | :------------------------------------ |
+| `<top>_tree.md`     | 全局 Address Map 和各 block 寄存器    |
+| `<top>_tree.html`   | 带折叠侧边导航的完整网页              |
+| `<top>_tree.xlsx`   | 带 sheet 导航和绝对地址的工作簿       |
+
+### 5.2 RTL `out/rtl/`
+
+```text
+out/rtl/<block>.sv
+out/rtl/plus/<block>_typedef.sv
+out/rtl/plus/<block>_wrap.sv
+out/rtl/plus/tmp_<block>.sv
+```
+
+- `<block>.sv`：展开 field 端口的主 CSR RTL。
+- `<block>_typedef.sv`：cfg/status/cmd/irq packed struct 类型。
+- `<block>_wrap.sv`：使用 struct 聚合寄存器端口的 wrapper。
+- `tmp_<block>.sv`：主模块和 wrapper 的集成提示模板。
+
+### 5.3 验证 `out/tb/`
+
+| 文件                   | 内容                      |
+| :--------------------- | :------------------------ |
+| `<block>_tb.sv`        | 基础读写自检 Testbench    |
+| `<block>_ral_pkg.sv`   | UVM RAL package           |
+
+### 5.4 Firmware `out/firmware/`
+
+Firmware Header 仅在 nested 模式生成：
+
+| 文件                     | 内容                                                |
+| :----------------------- | :-------------------------------------------------- |
+| `<top>_all_reg_addr.h`   | block base、register offset/default 和绝对地址宏    |
+| `<top>_all_reg_type.h`   | 寄存器 union/struct 类型                            |
+
+type header 不分配静态寄存器镜像存储空间。
+
+## 6. RTL 接口与架构
+
+### 6.1 csr_bus
+
+CSR bus 使用“请求通道 + 读响应通道”的轻量协议：
 
 - `csr_req_valid/csr_req_ready` 完成读写请求握手。
-- `csr_req_write=0` 表示读请求，`csr_req_write=1` 表示写请求。
-- 写请求只依赖 request ready 反压，不额外返回写响应。
-- 读请求通过 `csr_rsp_rvalid/csr_rsp_rdata` 返回读数据。
-- bus 支持连续写、连续读以及一定程度的 outstanding 读请求。
-- bus 不带 request id，因此 CSR demux 在跨 slave/mem 目标切换时会等待已有读响应返回，保证读返回顺序不乱序。
+- `csr_req_write=0` 表示读，`csr_req_write=1` 表示写。
+- 写请求只依赖 request ready，不返回额外写响应。
+- 读数据通过 `csr_rsp_rvalid/csr_rsp_rdata` 返回。
+- 支持连续读写和同一 slave 下的 outstanding 读。
+- bus 不携带 request id；存在 outstanding 时会阻止读请求切换到其他 slave，
+  保证返回顺序。
 
-连续访问时序如下图所示：
+连续访问时序：
 
 ![csr_bus连续读写时序](doc/assets/csr_bus_timing.png)
 
-WaveDrom 源文件：[`doc/assets/csr_bus_timing.json`](doc/assets/csr_bus_timing.json)
+可编辑时序源文件：
+[`doc/assets/csr_bus_timing.json`](doc/assets/csr_bus_timing.json)
 
-### 6.2 autogen_rtl 与 user_rtl 的 DFF 边界
+### 6.2 autogen RTL 与 user RTL 的 DFF 边界
 
-`reg_type` 决定寄存器字段的 DFF 位于自动生成 CSR 模块内部，还是由用户 RTL 维护：
-
-- `cfg`：DFF 在 `autogen_rtl` 内部。软件写配置值，硬件通过 `o_cfg_*` 或 wrapper struct 读取配置。
-- `status`：DFF 在 `user_rtl` 内部。硬件维护状态，CSR 模块通过 `i_sta_*` 采样并提供软件读取。
-- `cmd`：DFF 在 `autogen_rtl` 内部。W1T 字段写 1 翻转，软件可读回当前值，硬件消费 `o_cmd_*`。
-- `irq`：中断状态 DFF 在 `user_rtl` 内部。CSR 模块读取 `i_irqsta_*`，并根据 W1C 写入产生 `o_irqclr_*` 清除脉冲。
-
-边界关系如下图所示：
+- `cfg`：DFF 位于 autogen RTL，硬件通过 `o_cfg_*` 读取。
+- `status`：DFF 位于 user RTL，CSR 通过 `i_sta_*` 采样。
+- `cmd`：DFF 位于 autogen RTL，软件写 1 翻转。
+- `irq`：DFF 位于 user RTL，CSR 通过 `o_irqclr_*` 产生 W1C 清除脉冲。
 
 ![reg_type dff architecture](doc/assets/reg_type_dff_arch.png)
 
-### 6.3 cfg shadow 机制
+### 6.3 cfg shadow
 
-`shadow` 用于解决配置切换延时问题：硬件继续使用当前 working_reg 工作时，软件可以提前把下一组配置写入 shadow_reg；等 user RTL 需要切换配置时，再用更新脉冲把 shadow_reg 提交到 working_reg。它只对 `reg_type=cfg` 生效，生成规则如下：
+`shadow` 允许软件提前写入下一组配置，并在 user RTL 需要时提交到 working
+配置：
 
-- `shadow` 与 `shadow 1` 等价：每个 cfg field 额外生成一份 `r_shd_${reg}_${field}`。CSR bus 写 shadow_reg，软件读和 user RTL 看到的是 working_reg；`i_pulse_shadow_upen` 到来时，shadow_reg 提交到 working_reg。
-- `shadow N` 且 `N >= 2`：shadow_reg 仍然只有一份，working_reg 变成 N 份数组。`i_pulse_shadow_upen` 表示 push，把当前 shadow_reg 写入 `working[wr_idx]`；`i_pulse_shadow_rden` 表示 pop，让 user RTL 消费下一份 working 配置。
-- 同一个模块中，所有 `shadow N >= 2` 的 N 必须相同，否则生成器会报错；`shadow`/`shadow 1` 可以和 `shadow N>=2` 同时存在。
-- `o_dbg_shadow_wr_idx`、`o_dbg_shadow_rd_idx` 和 `o_dbg_shadow_water_level` 用于观察 FIFO 状态。`water_level` 表示还能容纳多少份配置，空时为 N，满时为 0。
-- `o_pulse_err_write_when_full` 与 `o_pulse_err_read_when_empty` 为组合逻辑输出，分别表示满时 push、空时 pop 的非法操作。
+- `shadow`/`shadow 1`：一份 shadow 和一份 working。
+- `shadow N`：一份 shadow 和 N 份 working FIFO。
+- `i_pulse_shadow_upen`：提交或 push 当前 shadow。
+- `i_pulse_shadow_rden`：消费或 pop 当前 working。
+- `o_dbg_shadow_*`：观察读写索引和剩余容量。
+- `o_pulse_err_write_when_full`、`o_pulse_err_read_when_empty`：非法 push/pop。
 
-shadow 数据流如下图所示：
+同一模块中所有 `shadow N >= 2` 必须使用相同深度。
 
 <img alt="cfg shadow mechanism" src="doc/assets/cfg_shadow_mechanism.png" width="600">
 
-### 6.4 RTL 输出结构
+### 6.4 生成 RTL 结构
 
-Single 模式下，RTL 输出默认分两层：
+主 RTL 的端口按以下顺序组织：
 
-```text
-out/rtl/${block}.sv
-out/rtl/plus/${block}_typedef.sv
-out/rtl/plus/${block}_wrap.sv
-out/rtl/plus/tmp_${block}.sv
+1. `clk/rst_n/clear`
+2. CSR RX
+3. CSR TX slave/mem bus
+4. cfg/status/cmd/irq 等寄存器接口
+
+`clear` 为高有效同步清零，`rst_n` 为低有效异步复位。slave/mem 地址经过范围
+demux 后，TX 地址会减去对应区域起始地址，转换为下一级本地地址。
+
+## 7. 常见问题与限制
+
+### 7.1 没有生成 Excel
+
+确认已安装 `openpyxl`：
+
+```bash
+python -m pip install "openpyxl>=3.1,<4"
 ```
 
-- `${block}.sv`：主 CSR RTL，端口保持展开形式，方便直接接入现有设计。
-- `${block}_typedef.sv`：共享 typedef 文件，供 wrapper 和 user RTL 共同 include。
-- `${block}_wrap.sv`：用 SystemVerilog `struct` 聚合 `cfg/status/cmd/irq` 接口，减少顶层端口数量。
-- `tmp_${block}.sv`：临时集成模板，展示 autogen RTL 与 user RTL 的普通端口连接方式，以及 struct 版本接口写法。
+### 7.2 能否生成 HTML
+
+可以。nested 模式会直接生成 `out/doc/<top>_tree.html`，不依赖浏览器或外部
+模板引擎。浏览器仅用于查看结果。
+
+### 7.3 地址重叠或超出 bytesize
+
+检查当前寄存器的 `offset/repeat`，以及 slave/mem 的 `offset/bytesize`。
+nested 模式还需要确认子模块实际使用空间没有超过父模块分配区域。
+
+### 7.4 名称被拒绝
+
+模块、寄存器和字段名称必须是可用于多种输出语言的合法标识符。名称不能命中
+Python、C、SystemVerilog 或 VHDL 保留关键字。
+
+### 7.5 当前协议限制
+
+- CSR bus 不带 request id，不支持跨 slave 的乱序读返回。
+- 写请求没有 response。
+- Firmware Header 仅在 nested 模式生成。
+- 生成目录中的同名文件会被覆盖。
+
+## 8. 二次开发指南
+
+### 8.1 核心数据模型
+
+`src/models.py` 定义：
+
+- `BaseInfoModel`：系统基地址、地址空间、数据位宽和元信息。
+- `FieldModel`：字段位范围、访问属性、默认值和描述。
+- `RegisterModel`：寄存器 offset、类型、special 和字段列表。
+- `SubModuleNode`：子模块实例名、offset、bytesize 和模型引用。
+- `ModuleModel`：单个 block 及其寄存器和子模块树。
+
+所有 `RegisterModel.offset` 都是模块内相对地址。绝对地址只在
+`ModuleModel.walk()` 遍历树时计算。
+
+### 8.2 代码模块职责
+
+| 文件                          | 职责                                  |
+| :---------------------------- | :------------------------------------ |
+| `src/reg_parser.py`           | 读取输入、建立模型并执行校验          |
+| `src/reg_gen_doc.py`          | 生成 Markdown、HTML 和 Excel          |
+| `src/reg_gen_rtl.py`          | 生成主 RTL、typedef、wrapper 和模板   |
+| `src/reg_gen_tb.py`           | 生成自检 TB 和 UVM RAL                |
+| `src/reg_gen_firmware.py`     | 生成 Firmware Header                  |
+| `src/reg_common.py`           | 通用解析、标识符和文件工具            |
+| `src/autogen_reg.py`          | CLI 和端到端生成流程                  |
+
+### 8.3 遍历示例
+
+遍历单模块寄存器：
+
+```python
+def traverse_module_regs(module: ModuleModel):
+    for reg in module.registers:
+        print(reg.name, hex(reg.offset), reg.reg_type)
+        for field in reg.fields:
+            print("  ", field.name, field.msb, field.lsb)
+```
+
+遍历完整寄存器树：
+
+```python
+for block, absolute_base, path in module.walk():
+    print("/".join(path), hex(absolute_base))
+```
+
+### 8.4 验证修改
+
+修改 parser 或生成器后运行：
+
+```bash
+python -B -m unittest -v
+python -B src/autogen_reg.py -i input/top_reg.md -m nested -o out
+```
+
+新增输入语义时，应同步更新 parser 校验、对应生成器、`test_parser.py` 和
+`doc/gpt_prompt.md`。

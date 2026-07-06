@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Iterator
 
 
 @dataclass
@@ -136,10 +136,6 @@ class ModuleModel:
                 absolute_base + node.offset,
                 current_path,
             )
-
-    def to_dict(self) -> dict[str, Any]:
-        data = asdict(self)
-        return data
 
     @staticmethod
     def clean_name(path: str) -> str:

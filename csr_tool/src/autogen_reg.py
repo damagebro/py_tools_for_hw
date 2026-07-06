@@ -29,7 +29,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "-i",
         "--input",
         required=True,
-        help="Input register definition (.md, .xlsx, or .json)",
+        help="Input register definition (.md or .xlsx)",
     )
     parser.add_argument(
         "-o",

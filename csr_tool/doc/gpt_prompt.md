@@ -26,9 +26,9 @@
 工具必须：
 
 - 使用 Python 3.10+。
-- 支持 Markdown、XLSX、JSON 三种输入。
+- 支持 Markdown、XLSX 两种输入。
 - 支持 single 和 nested 两种模式。
-- 生成 Markdown、HTML、XLSX 和条件式 JSON 文档。
+- 生成 Markdown、HTML 和 XLSX 文档。
 - 为 nested 树中的每个唯一模块生成 CSR RTL、typedef、wrapper 和集成模板。
 - 为每个唯一模块生成自检 Testbench 和 UVM RAL package。
 - 在 nested 模式生成 Firmware C Header。
@@ -58,8 +58,6 @@ csr_tool/
 │   ├── mid_b_reg.md
 │   ├── leaf_a1_reg.md
 │   ├── leaf_a2_reg.md
-│   ├── json/
-│   │   └── convert_md2json.py
 │   └── xlsx/
 │       └── convert_md2xlsx.py
 └── src/
@@ -88,7 +86,6 @@ openpyxl>=3.1,<4
 ```gitignore
 csr_tool/out/
 csr_tool/input/xlsx/*.xlsx
-csr_tool/input/json/*.json
 ```
 
 ---
@@ -203,7 +200,6 @@ sub_modules: list[SubModuleNode]
 - `local_size`：模块内所有寄存器或地址区域占用的最大结束地址。
 - `walk()`：深度优先遍历，返回 `(module, absolute_base, path_tuple)`。
 - 根绝对地址从 `system_baseaddr` 开始，子节点绝对地址为父基址加子节点 offset。
-- `to_dict()`：输出可序列化字典。
 - `clean_name(path)`：文件名转小写，并移除 `_reg` 或 `_register` 后缀。
 
 保留兼容别名：
@@ -228,7 +224,6 @@ SubModuleInstance = SubModuleNode
 - `clog2`
 - `hex_width`
 - `write_text`
-- `write_json`
 
 整数支持：
 
@@ -278,18 +273,7 @@ module = parser.parse()
 - 空行忽略。
 - 没有 `openpyxl` 时抛出清晰的 ImportError。
 
-### 6.3 JSON
-
-接受：
-
-- 顶层直接是 module 字典。
-- 或 `{"module": {...}}`。
-- `base_info` 为对象。
-- 寄存器列表可叫 `reg_define` 或 `registers`。
-- 支持生成器 `ModuleModel.to_dict()` 输出的结构化 registers/fields/special。
-- 也支持接近原表格的一行一个 field 格式。
-
-### 6.4 base_info
+### 6.3 base_info
 
 识别别名：
 
@@ -302,7 +286,7 @@ system_byte_size -> system_bytesize
 
 `reg_bitwidth` 必须在 8 到 64 之间并且按 byte 对齐。
 
-### 6.5 reg_define 列
+### 6.4 reg_define 列
 
 以下列全部必须存在，列名大小写只对 `SW_access` 做兼容处理：
 
@@ -319,7 +303,7 @@ special
 description
 ```
 
-### 6.6 新寄存器和 field continuation
+### 6.5 新寄存器和 field continuation
 
 - 行中 `offset` 或 `reg_name` 任一非空，表示新寄存器。
 - 新寄存器必须填写 `reg_name`。
@@ -327,7 +311,7 @@ description
 - 第一条寄存器前不能出现 continuation。
 - 空 offset 自动使用上一地址区域结束地址。
 
-### 6.7 reg_name 去重
+### 6.6 reg_name 去重
 
 先统计所有新寄存器的原始名字：
 
@@ -336,7 +320,7 @@ description
 
 编号后的名字用于 RTL、文档、TB 和 Firmware。
 
-### 6.8 reg_type 与 SW_access
+### 6.7 reg_type 与 SW_access
 
 严格绑定：
 
@@ -352,7 +336,7 @@ mem     -> 空
 
 用户填写非空但不匹配时必须报错。
 
-### 6.9 special
+### 6.8 special
 
 逗号分隔，支持：
 
@@ -377,7 +361,7 @@ slv_filename=xxx.md
 - 同一模块所有 `shadow N` 且 `N >= 2` 的 N 必须一致。
 - `shadow`/`shadow 1` 可以与 `shadow N >= 2` 共存。
 
-### 6.10 地址检查
+### 6.9 地址检查
 
 - offset 必须按 `word_bytes` 对齐。
 - 手填 offset 必须大于等于前一个地址区域结束地址。
@@ -393,7 +377,7 @@ slave 未填写 bytesize 时：
 - 若是最后一项且有 `system_bytesize`，推导为 system_bytesize 减当前 offset。
 - 其他情况报错。
 
-### 6.11 field 检查
+### 6.10 field 检查
 
 - 非 slave/mem 至少有一个 field。
 - slave/mem 禁止 field。
@@ -402,7 +386,7 @@ slave 未填写 bytesize 时：
 - 同一寄存器 field 名不能重复。
 - continuation 行的非空 SW_access 必须与寄存器一致。
 
-### 6.12 nested
+### 6.11 nested
 
 - 只在 nested 模式递归加载 slave。
 - 子文件路径相对于父输入文件目录。
@@ -422,7 +406,7 @@ slave 未填写 bytesize 时：
 参数：
 
 ```text
--i, --input     必填，.md/.xlsx/.json
+-i, --input     必填，.md/.xlsx
 -o, --outdir    默认 out
 -m, --mode      single 或 nested，默认 single
 --nested        --mode nested 的兼容别名
@@ -466,7 +450,6 @@ generate_all(is_nested=False) -> list[Path]
 ```text
 out/doc/<block>_gen.md
 out/doc/<block>_gen.xlsx
-out/doc/<block>_gen.json   # 仅当输入本身为 JSON
 ```
 
 Markdown 输出必须可以再次作为输入，并得到相同模型和生成结果。格式化后的表格：
@@ -484,7 +467,6 @@ Markdown 输出必须可以再次作为输入，并得到相同模型和生成�
 <root>_tree.md
 <root>_tree.html
 <root>_tree.xlsx
-<root>_tree.json   # 仅当根输入为 JSON
 ```
 
 tree Markdown 包含：
@@ -532,7 +514,7 @@ tree HTML：
 - field 区使用当前输入规范的表头：
   `field`、`bit_scope`、`default_value`、`description`。
 - `bit_scope` 合并输入中的 msb/lsb，显示为 `[msb:lsb]`，例如 `[31:0]`。
-- Markdown/XLSX/JSON 输入输出模型仍分别保留 msb 和 lsb，不做 schema 修改。
+- Markdown/XLSX 输入输出模型仍分别保留 msb 和 lsb，不做 schema 修改。
 - 不照搬参考页面中的中文表头或 `type/spec/default/comment` 别名。
 - 属性表头和 field 表头使用灰色背景，值单元格使用白色背景。
 - register table 不使用 `width: 100%` 铺满页面。
@@ -1027,16 +1009,6 @@ out/firmware/<root>_all_reg_type.h
 - 将 slave 的 `slv_filename` 扩展名改为 `.xlsx`，并使用 clean block name。
 - 这样 `input/xlsx/top.xlsx -m nested` 可以直接递归运行。
 
-### 12.2 Markdown 到 JSON
-
-`input/json/convert_md2json.py`：
-
-- 遍历 `input/*.md`。
-- 使用 parser 和 `ModuleModel.to_dict()`。
-- 输出 `input/json/<clean_block_name>.json`。
-- 将 slave 的 `slv_filename` 扩展名改为 `.json`。
-- 这样 `input/json/top.json -m nested` 可以直接递归运行。
-
 ---
 
 ## 13. 自动测试
@@ -1057,7 +1029,7 @@ out/firmware/<root>_all_reg_type.h
 
 4. field 使用保留字必须报错。
 
-5. ModuleModel JSON round trip。
+5. JSON 输入必须以 unsupported input format 报错。
 
 6. `repeat 2, shadow 4` 与 irq RTL 生成。
    - 检查 `SHADOW_DEPTH = 4`。
@@ -1091,15 +1063,13 @@ python -B -m unittest -v
 在 `csr_tool/` 下执行：
 
 ```bash
-python -B -m compileall -q src input/xlsx input/json test_parser.py
+python -B -m compileall -q src input/xlsx test_parser.py
 python -B -m unittest -v
 
 python -B input/xlsx/convert_md2xlsx.py
-python -B input/json/convert_md2json.py
 
 python -B src/autogen_reg.py -i input/top_reg.md -m nested -o out
 python -B src/autogen_reg.py -i input/xlsx/top.xlsx -m nested -o out/from_xlsx
-python -B src/autogen_reg.py -i input/json/top.json -m nested -o out/from_json
 ```
 
 Markdown top nested 当前应生成 41 个文件：
@@ -1108,8 +1078,6 @@ Markdown top nested 当前应生成 41 个文件：
 - RTL：5 个唯一模块，每个 4 个文件，共 20。
 - TB/RAL：5 个唯一模块，每个 2 个文件，共 10。
 - Firmware：2 个 Header。
-
-JSON 输入比 Markdown/XLSX 多一个 tree JSON。
 
 若环境存在 `pyslang`，增加：
 
@@ -1121,7 +1089,7 @@ JSON 输入比 Markdown/XLSX 多一个 tree JSON。
 当前基准：
 
 ```text
-Python unittest:       8/8 pass
+Python unittest:       11/11 pass
 SV syntax:             30 files, 0 failures
 RTL + TB semantics:     5 pairs, 0 failures
 ```
@@ -1161,9 +1129,9 @@ git diff --check
 9. typedef 和 wrapper
 10. `reg_gen_tb.py`
 11. CLI
-12. XLSX/JSON 转换脚本
-13. 全部 7 项单测
-14. 三种输入 nested 端到端
+12. XLSX 转换脚本
+13. 全部 11 项单测
+14. 两种输入 nested 端到端
 15. SV 语法、语义、风格和 whitespace 验收
 
 不要在 parser 中混入字符串模板，不要在各生成器重复解析 special，不要把绝对地址写回
@@ -1173,6 +1141,6 @@ RegisterModel，不要为了通过样例而硬编码模块名。
 
 - 修改的模块。
 - 测试数量。
-- 三种输入是否端到端通过。
+- 两种输入是否端到端通过。
 - SV 语法和语义检查结果。
 - 当前环境无法执行的检查。

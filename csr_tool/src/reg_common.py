@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import keyword
 import math
 import re
@@ -155,7 +154,3 @@ def hex_width(bitwidth: int) -> int:
 def write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content.rstrip() + "\n", encoding="utf-8", newline="\n")
-
-
-def write_json(path: Path, data: Any) -> None:
-    write_text(path, json.dumps(data, indent=2, ensure_ascii=False))

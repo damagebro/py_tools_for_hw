@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import tempfile
 import unittest
-import json
 from pathlib import Path
 
 from src.autogen_reg import run
@@ -92,25 +91,15 @@ class ParserTests(unittest.TestCase):
             ):
                 CSRParser(str(path)).parse()
 
-    def test_json_round_trip(self) -> None:
-        original = CSRParser(str(ROOT / "input" / "leaf_a2_reg.md")).parse()
+    def test_json_input_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            path = Path(temp) / "leaf_a2.json"
-            path.write_text(
-                json.dumps(original.to_dict(), ensure_ascii=False),
-                encoding="utf-8",
-            )
-            reparsed = CSRParser(str(path)).parse()
-            self.assertEqual(
-                [
-                    (reg.name, reg.offset, reg.default_word())
-                    for reg in original.registers
-                ],
-                [
-                    (reg.name, reg.offset, reg.default_word())
-                    for reg in reparsed.registers
-                ],
-            )
+            path = Path(temp) / "unsupported.json"
+            path.write_text("{}", encoding="utf-8")
+            with self.assertRaisesRegex(
+                CSRValidationError,
+                "unsupported input format '.json'",
+            ):
+                CSRParser(str(path)).parse()
 
     def test_shadow_and_irq_generation(self) -> None:
         text = """# base_info
