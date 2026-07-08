@@ -1,8 +1,6 @@
 # CSR Autogen Tool
 
-CSR Autogen Tool 是一款轻量级寄存器自动化生成工具。它解析 Markdown 或
-Excel 寄存器定义，生成文档、SystemVerilog RTL、自检 Testbench、
-UVM RAL 模型以及 Firmware C Header。
+CSR Autogen Tool 是一款轻量级寄存器自动化生成工具。它解析 Markdown 或 Excel 寄存器定义，生成文档、SystemVerilog RTL、自检 Testbench、UVM RAL 模型以及 Firmware C Header。
 
 ## 1. 工具概览
 
@@ -24,7 +22,7 @@ UVM RAL 模型以及 Firmware C Header。
 | 3    | 输入表格、寄存器类型和校验规则        |
 | 4    | single/nested 两种生成模式            |
 | 5    | `out/` 下各类生成文件                 |
-| 6    | CSR bus、DFF 边界、shadow 和 RTL 结构 |
+| 6    | RTL 集成说明                          |
 | 7    | 常见问题与当前限制                    |
 | 8    | 内部模型、代码模块和二次开发          |
 
@@ -38,8 +36,7 @@ UVM RAL 模型以及 Firmware C Header。
 python -m pip install -r requirements.txt
 ```
 
-`openpyxl` 用于读取和生成 Excel。未安装时，Markdown、HTML、RTL 和 TB
-仍可生成，但 Excel 输入不可解析，Excel 输出会被跳过。
+`openpyxl` 用于读取和生成 Excel。未安装时，Markdown、HTML、RTL 和 TB 仍可生成，但 Excel 输入不可解析，Excel 输出会被跳过。
 
 查看命令行参数：
 
@@ -52,16 +49,10 @@ python src/autogen_reg.py --help
 生成单个模块：
 
 ```bash
-python src/autogen_reg.py -i input/leaf_a1_reg.md -m single -o out
+python src/autogen_reg.py -i input/leaf_a1_reg.md -o out
 ```
 
 从顶层递归生成完整寄存器树：
-
-```bash
-python src/autogen_reg.py -i input/top_reg.md -m nested -o out
-```
-
-`--nested` 是 `--mode nested` 的兼容别名：
 
 ```bash
 python src/autogen_reg.py -i input/top_reg.md --nested -o out
@@ -73,13 +64,12 @@ python src/autogen_reg.py -i input/top_reg.md --nested -o out
 
 ```bash
 python input/xlsx/convert_md2xlsx.py
-python src/autogen_reg.py -i input/xlsx/top_reg.xlsx -m nested -o out
+python src/autogen_reg.py -i input/xlsx/top_reg.xlsx --nested -o out
 ```
 
 ## 3. 输入定义规范
 
-推荐使用 Markdown。纯文本便于评审、差异比较和版本控制；Excel 适合表格编辑，
-也适合非开发人员维护寄存器表。
+推荐使用 Markdown。纯文本便于评审、差异比较和版本控制；Excel 适合表格编辑，也适合非开发人员维护寄存器表。
 
 ### 3.1 base_info
 
@@ -109,8 +99,7 @@ python src/autogen_reg.py -i input/xlsx/top_reg.xlsx -m nested -o out
 | `special`         | repeat、shadow、bytesize 或子模块文件     |
 | `description`     | 寄存器或字段说明                          |
 
-一个寄存器有多个字段时，后续字段行可以留空 `offset` 和 `reg_name`。同一模块
-中重复的 `reg_name` 会按出现顺序自动添加编号。
+一个寄存器有多个字段时，后续字段行可以留空 `offset` 和 `reg_name`。同一模块中重复的 `reg_name` 会按出现顺序自动添加编号。
 
 #### 3.2.1 reg_type 与 SW_access
 
@@ -135,9 +124,7 @@ python src/autogen_reg.py -i input/xlsx/top_reg.xlsx -m nested -o out
 - `shadow` / `shadow 1`：一份 shadow 和一份 working 配置。
 - `shadow N`：一份 shadow 和 N 份 FIFO working 配置。
 
-`repeat N` 的 `default_value` 支持 CSV。若默认值数量少于 N，后续实例沿用
-最后一个值。例如 `repeat 4` 配合 `0x12,12` 会展开为
-`[0]=0x12, [1]=12, [2]=12, [3]=12`。
+`repeat N` 的 `default_value` 支持 CSV。若默认值数量少于 N，后续实例沿用最后一个值。例如 `repeat 4` 配合 `0x12,12` 会展开为 `[0]=0x12, [1]=12, [2]=12, [3]=12`。
 
 ### 3.3 输入检查
 
@@ -162,15 +149,14 @@ single 是默认模式，只解析指定文件：
 python src/autogen_reg.py -i input/leaf_a2_reg.md -o out
 ```
 
-适合单模块开发、局部验证和回灌生成的 `*_gen.md`/`*_gen.xlsx`。寄存器 offset
-保持模块内相对地址，不递归加载 `slv_filename`。
+适合单模块开发、局部验证和回灌生成的 `*_gen.md`/`*_gen.xlsx`。寄存器 offset 保持模块内相对地址，不递归加载 `slv_filename`。
 
 ### 4.2 nested 模式
 
 nested 从顶层文件开始，递归解析每个 `slave` 的 `slv_filename`：
 
 ```bash
-python src/autogen_reg.py -i input/top_reg.md -m nested -o out
+python src/autogen_reg.py -i input/top_reg.md --nested -o out
 ```
 
 该模式会：
@@ -217,7 +203,9 @@ out/rtl/plus/tmp_<block>.sv
 - `<block>_wrap.sv`：使用 struct 聚合寄存器端口的 wrapper。
 - `tmp_<block>.sv`：主模块和 wrapper 的集成提示模板。
 
-### 5.3 验证 `out/tb/`
+### 5.3 验证 `out/tb/`（TBD）
+
+验证组件输出暂未人工复查过，当前仅作为自动生成内容保留。
 
 | 文件                   | 内容                      |
 | :--------------------- | :------------------------ |
@@ -235,26 +223,39 @@ Firmware Header 仅在 nested 模式生成：
 
 type header 不分配静态寄存器镜像存储空间。
 
-## 6. RTL 接口与架构
+## 6. RTL 集成说明
 
 ### 6.1 csr_bus
 
 CSR bus 使用“请求通道 + 读响应通道”的轻量协议：
+
+autogen RTL 接收到的 CSR bus 信号：
+
+| signal_name        | bit_width  | I/O | description                                              |
+| ------------------ | ---------- | --- | -------------------------------------------------------- |
+| `i_csr_req_valid`  | 1          | I   | 请求有效，高有效。                                       |
+| `o_csr_req_ready`  | 1          | O   | 请求可接收，高有效；与 valid 同周期为一次 request fire。 |
+| `i_csr_req_write`  | 1          | I   | 写使能；0 表示读，1 表示写。                             |
+| `i_csr_req_addr`   | `CSR_AW`   | I   | CSR 地址；tree 模式顶层使用绝对地址。                    |
+| `i_csr_req_wdata`  | `CSR_DW`   | I   | 写数据。                                                 |
+| `i_csr_req_wstrb`  | `CSR_DW/8` | I   | 写字节使能；每 bit 对应 1 byte。                         |
+| `o_csr_rsp_rvalid` | 1          | O   | 读响应有效，高有效；写请求无响应。                       |
+| `o_csr_rsp_rdata`  | `CSR_DW`   | O   | 读响应数据；空洞地址返回 `CSR_INVALID_RDATA`。           |
+
+协议要点：
 
 - `csr_req_valid/csr_req_ready` 完成读写请求握手。
 - `csr_req_write=0` 表示读，`csr_req_write=1` 表示写。
 - 写请求只依赖 request ready，不返回额外写响应。
 - 读数据通过 `csr_rsp_rvalid/csr_rsp_rdata` 返回。
 - 支持连续读写和同一 slave 下的 outstanding 读。
-- bus 不携带 request id；存在 outstanding 时会阻止读请求切换到其他 slave，
-  保证返回顺序。
+- bus 不携带 request id；存在 outstanding 时会阻止读请求切换到其他 slave，保证返回顺序。
 
 连续访问时序：
 
 ![csr_bus连续读写时序](doc/assets/csr_bus_timing.png)
 
-可编辑时序源文件：
-[`doc/assets/csr_bus_timing.json`](doc/assets/csr_bus_timing.json)
+可编辑时序源文件：[`doc/assets/csr_bus_timing.json`](doc/assets/csr_bus_timing.json)
 
 ### 6.2 autogen RTL 与 user RTL 的 DFF 边界
 
@@ -267,8 +268,7 @@ CSR bus 使用“请求通道 + 读响应通道”的轻量协议：
 
 ### 6.3 cfg shadow
 
-`shadow` 允许软件提前写入下一组配置，并在 user RTL 需要时提交到 working
-配置：
+`shadow` 允许软件提前写入下一组配置，并在 user RTL 需要时提交到 working 配置：
 
 - `shadow`/`shadow 1`：一份 shadow 和一份 working。
 - `shadow N`：一份 shadow 和 N 份 working FIFO。
@@ -290,8 +290,7 @@ CSR bus 使用“请求通道 + 读响应通道”的轻量协议：
 3. CSR TX slave/mem bus
 4. cfg/status/cmd/irq 等寄存器接口
 
-`clear` 为高有效同步清零，`rst_n` 为低有效异步复位。slave/mem 地址经过范围
-demux 后，TX 地址会减去对应区域起始地址，转换为下一级本地地址。
+`clear` 为高有效同步清零，`rst_n` 为低有效异步复位。slave/mem 地址经过范围 demux 后，TX 地址会减去对应区域起始地址，转换为下一级本地地址。
 
 ## 7. 常见问题与限制
 
@@ -305,18 +304,15 @@ python -m pip install "openpyxl>=3.1,<4"
 
 ### 7.2 能否生成 HTML
 
-可以。nested 模式会直接生成 `out/doc/<top>_tree.html`，不依赖浏览器或外部
-模板引擎。浏览器仅用于查看结果。
+可以。nested 模式会直接生成 `out/doc/<top>_tree.html`，不依赖浏览器或外部模板引擎。浏览器仅用于查看结果。
 
 ### 7.3 地址重叠或超出 bytesize
 
-检查当前寄存器的 `offset/repeat`，以及 slave/mem 的 `offset/bytesize`。
-nested 模式还需要确认子模块实际使用空间没有超过父模块分配区域。
+检查当前寄存器的 `offset/repeat`，以及 slave/mem 的 `offset/bytesize`。nested 模式还需要确认子模块实际使用空间没有超过父模块分配区域。
 
 ### 7.4 名称被拒绝
 
-模块、寄存器和字段名称必须是可用于多种输出语言的合法标识符。名称不能命中
-Python、C、SystemVerilog 或 VHDL 保留关键字。
+模块、寄存器和字段名称必须是可用于多种输出语言的合法标识符。名称不能命中 Python、C、SystemVerilog 或 VHDL 保留关键字。
 
 ### 7.5 当前协议限制
 
@@ -337,8 +333,7 @@ Python、C、SystemVerilog 或 VHDL 保留关键字。
 - `SubModuleNode`：子模块实例名、offset、bytesize 和模型引用。
 - `ModuleModel`：单个 block 及其寄存器和子模块树。
 
-所有 `RegisterModel.offset` 都是模块内相对地址。绝对地址只在
-`ModuleModel.walk()` 遍历树时计算。
+所有 `RegisterModel.offset` 都是模块内相对地址。绝对地址只在 `ModuleModel.walk()` 遍历树时计算。
 
 ### 8.2 代码模块职责
 
@@ -377,8 +372,7 @@ for block, absolute_base, path in module.walk():
 
 ```bash
 python -B -m unittest -v
-python -B src/autogen_reg.py -i input/top_reg.md -m nested -o out
+python -B src/autogen_reg.py -i input/top_reg.md --nested -o out
 ```
 
-新增输入语义时，应同步更新 parser 校验、对应生成器、`test_parser.py` 和
-`doc/gpt_prompt.md`。
+新增输入语义时，应同步更新 parser 校验、对应生成器、`test_parser.py` 和 `doc/gpt_prompt.md`。

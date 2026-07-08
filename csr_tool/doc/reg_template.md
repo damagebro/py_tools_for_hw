@@ -64,7 +64,7 @@
 | --- | --- |reg_gen_rtl.py
 | --- | --- |reg_gen_tb.py
 | --- | --- |reg_gen_doc.py
-| --- | --- |reg_gen_firmware.py   #通过统一模型生成rtl/tb/doc/firmware等, 也请gemini选择更好的输出方式， 你好像推荐过jinja2模板?   到了reg_gen_other步骤我们再讨论;
+| --- | --- |reg_gen_firmware.py   #通过统一模型生成rtl/tb/doc/firmware等;
 | --- | input/    #所有手填寄存器输入文件
 | --- |out/      #csr_tool输出内容, 输出rtl/testbench/doc/firmware, 对应下面几个输出目录;
 | --- | --- | doc/  #输出的寄存器文件, (1)若是单模块模式, 可输出.xlsx/.md格式, 输入已被脚本自动处理; (2) 若是嵌套模式, 可输出.xlsx/.html/.md格式, 根据"树状图"结构产生多级标题, 给出address_map;
@@ -262,7 +262,7 @@ input  wire                     i_tx_ram_rd_ack          ,
    - 面向rtl单个module用户, 说明填表方式, 规则, 输出内容;
    - 面向rtl集成者/top验证/固件开发者, 简介嵌套模式输出内容;
    - 面向共同的该工具开发者, 说明中间变量数据结构, 如何按tree结构遍历;  方便以后生成rtl/tb/firmware;
-9. 增加输入输出文件格式excel格式,  (1) 调用openpyxl第三方包;  (2) 如果该包不存在， 和jinji2类似提示包不存在, 但markdown基础格式仍可运行;   (3) tree结构的excel输出, 第一个sheet输出address_map, 后面每个sheet输出一个module节点; (4) 好像excel有sheet导航栏, 类似网页标题目录形式, 点击可以跳转到对应sheet;  如果openpyxl能生成该导航栏就生成, 生成不了就忽略导航栏功能。
+9. 增加输入输出文件格式excel格式,  (1) 调用openpyxl第三方包;  (2) 如果该包不存在，提示包不存在, 但markdown基础格式仍可运行;   (3) tree结构的excel输出, 第一个sheet输出address_map, 后面每个sheet输出一个module节点; (4) 好像excel有sheet导航栏, 类似网页标题目录形式, 点击可以跳转到对应sheet;  如果openpyxl能生成该导航栏就生成, 生成不了就忽略导航栏功能。
 10. 近期规划: (1) 中间模型内容对齐, (2) 生成好readme.md,  (3) firmware.h内容对齐, (4) src/目录下, python源代码组织，可以多一些文件, 单个文件不超过500~1000行, 公用函数可以提取xx_common.py;
 11. 中级规划: 开始rtl生成, (1) reg_bus定义, 高性能; (2) reg_bus到rtl实现, shadow N/repeat N的检查 (3) 输出接口封装为struct/package形式; (4) 开发配套功能, a. amba2reg_bus协议转换, axi/axi_lite/apb/ahb与reg_bus的互转, b. reg_bus.regslice功能, 远距离打拍, c. reg_bus.demux功能, 适配reg_type=slave/mem;  d. reg_bus to sram_access功能;
 12. 当reg_type=slave的时候,  如果没有slv_filename, 或filename对应的文件不存在， 要报错退出;
