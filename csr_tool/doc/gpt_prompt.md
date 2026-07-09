@@ -34,7 +34,7 @@
 - 在 nested 模式生成 Firmware C Header。
 - 不依赖 pandas。
 - Markdown 基础流程只依赖 Python 标准库。
-- XLSX 使用 `openpyxl`；未安装时给出清晰提示。
+- HTML 使用 `jinja2` 模板生成；XLSX 使用 `openpyxl`。缺少 `jinja2` 时跳过 HTML，缺少 `openpyxl` 时跳过 Excel，基础 Markdown 生成不能被这两个可选依赖阻断。
 - 所有人工写入和生成的文本文件使用 UTF-8、LF 换行。
 - 所有生成 RTL 必须符合 `com/doc/coding_style.md`。
 
@@ -60,16 +60,17 @@ csr_tool/
 │   ├── leaf_a2_reg.md
 │   └── xlsx/
 │       └── convert_md2xlsx.py
-└── src/
-    ├── __init__.py
-    ├── autogen_reg.py
-    ├── models.py
-    ├── reg_common.py
-    ├── reg_parser.py
-    ├── reg_gen_doc.py
-    ├── reg_gen_rtl.py
-    ├── reg_gen_tb.py
-    └── reg_gen_firmware.py
+├── src/
+│   ├── __init__.py
+│   ├── autogen_reg.py
+│   ├── models.py
+│   ├── reg_common.py
+│   ├── reg_parser.py
+│   ├── reg_gen_doc.py
+│   ├── reg_gen_rtl.py
+│   ├── reg_gen_tb.py
+│   ├── reg_gen_firmware.py
+│   └── tree.html.j2
 ```
 
 依赖文件：
@@ -79,7 +80,7 @@ jinja2>=3.1,<4
 openpyxl>=3.1,<4
 ```
 
-当前 HTML 生成可以直接使用标准库，不强制使用 Jinja2。
+当前 HTML 生成使用 Jinja2 模板，模板文件为 `src/tree.html.j2`。未安装 Jinja2 时跳过 HTML 输出。
 
 仓库 `.gitignore` 至少忽略：
 
@@ -1007,7 +1008,7 @@ out/firmware/<root>_all_reg_type.h
 - 使用主 parser 和 doc generator，不复制另一套解析逻辑。
 - 输出 `input/xlsx/<clean_block_name>.xlsx`。
 - 将 slave 的 `slv_filename` 扩展名改为 `.xlsx`，并使用 clean block name。
-- 这样 `input/xlsx/top.xlsx -m nested` 可以直接递归运行。
+- 这样 `input/xlsx/top.xlsx --nested` 可以直接递归运行。
 
 ---
 
@@ -1068,8 +1069,8 @@ python -B -m unittest -v
 
 python -B input/xlsx/convert_md2xlsx.py
 
-python -B src/autogen_reg.py -i input/top_reg.md -m nested -o out
-python -B src/autogen_reg.py -i input/xlsx/top.xlsx -m nested -o out/from_xlsx
+python -B src/autogen_reg.py -i input/top_reg.md --nested -o out
+python -B src/autogen_reg.py -i input/xlsx/top.xlsx --nested -o out/from_xlsx
 ```
 
 Markdown top nested 当前应生成 41 个文件：

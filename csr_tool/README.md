@@ -36,7 +36,7 @@ CSR Autogen Tool 是一款轻量级寄存器自动化生成工具。它解析 Ma
 python -m pip install -r requirements.txt
 ```
 
-`openpyxl` 用于读取和生成 Excel。未安装时，Markdown、HTML、RTL 和 TB 仍可生成，但 Excel 输入不可解析，Excel 输出会被跳过。
+`jinja2` 用于生成 HTML，`openpyxl` 用于读取和生成 Excel。未安装 `jinja2` 时，Markdown、RTL 和 TB 仍可生成，但 HTML 输出会被跳过；未安装 `openpyxl` 时，Excel 输入不可解析，Excel 输出会被跳过。
 
 查看命令行参数：
 
@@ -304,7 +304,7 @@ python -m pip install "openpyxl>=3.1,<4"
 
 ### 7.2 能否生成 HTML
 
-可以。nested 模式会直接生成 `out/doc/<top>_tree.html`，不依赖浏览器或外部模板引擎。浏览器仅用于查看结果。
+可以。nested 模式会通过 Jinja2 模板生成 `out/doc/<top>_tree.html`，不依赖浏览器运行时。未安装 `jinja2` 时会跳过 HTML 输出，但 Markdown 等其它输出仍会生成。
 
 ### 7.3 地址重叠或超出 bytesize
 

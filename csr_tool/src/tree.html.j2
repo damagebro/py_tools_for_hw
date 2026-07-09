@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ module_name }} register tree</title>
+<style>
+html { scroll-behavior: smooth; }
+body { font-family: Arial, sans-serif; margin: 0; color: #202124; }
+.page-shell {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  width: 100%;
+  min-width: 0;
+  min-height: 100vh;
+  transition: grid-template-columns 160ms ease;
+}
+.page-shell.sidebar-collapsed { grid-template-columns: 52px minmax(0, 1fr); }
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 20px 16px;
+  background: #f3f5f7;
+  border-right: 1px solid #c9ced6;
+}
+.sidebar-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.sidebar-title { font-size: 18px; font-weight: 700; white-space: nowrap; }
+.sidebar-toggle {
+  display: inline-flex;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: #fff;
+  border: 1px solid #aeb6bf;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.sidebar-toggle:hover { background: #e3e8ed; }
+.toggle-icon { position: relative; width: 16px; height: 14px; }
+.toggle-icon span {
+  position: absolute;
+  left: 0;
+  width: 16px;
+  height: 2px;
+  background: #26384a;
+  transition: transform 160ms ease, opacity 160ms ease, top 160ms ease;
+}
+.toggle-icon span:nth-child(1) { top: 1px; }
+.toggle-icon span:nth-child(2) { top: 6px; }
+.toggle-icon span:nth-child(3) { top: 11px; }
+.page-shell:not(.sidebar-collapsed) .toggle-icon span:nth-child(1) {
+  top: 6px;
+  transform: rotate(45deg);
+}
+.page-shell:not(.sidebar-collapsed) .toggle-icon span:nth-child(2) { opacity: 0; }
+.page-shell:not(.sidebar-collapsed) .toggle-icon span:nth-child(3) {
+  top: 6px;
+  transform: rotate(-45deg);
+}
+.page-shell.sidebar-collapsed .sidebar { padding: 10px 8px; }
+.page-shell.sidebar-collapsed .sidebar-title,
+.page-shell.sidebar-collapsed .sidebar nav { display: none; }
+.sidebar nav { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.sidebar a {
+  display: block;
+  color: #26384a;
+  padding: 6px 8px;
+  text-decoration: none;
+  border-left: 3px solid transparent;
+}
+.sidebar a:hover { background: #e3e8ed; border-left-color: #4b6478; }
+.nav-address { font-weight: 700; }
+.nav-module-group { margin-left: calc(var(--depth) * 10px); }
+.nav-module-group > summary {
+  cursor: pointer;
+  color: #26384a;
+  font-weight: 600;
+}
+.nav-module-group > summary::marker { color: #647789; }
+.nav-module { padding: 6px 8px; font-weight: 600; }
+.nav-registers { margin-left: 12px; }
+.nav-register { font-family: Consolas, monospace; font-size: 13px; }
+.content { min-width: 0; padding: 24px 28px; }
+.table-scroll { max-width: 100%; overflow-x: auto; }
+.address-table { table-layout: fixed; width: 90ch; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0 24px; }
+th, td { border: 1px solid #c9ced6; padding: 7px 9px; text-align: left; }
+th { background: #eef2f6; position: sticky; top: 0; }
+tr:nth-child(even) { background: #f8fafc; }
+.content > details {
+  border-top: 1px solid #c9ced6;
+  padding: 12px 0;
+  overflow-x: auto;
+}
+.content > details > summary { cursor: pointer; font-size: 18px; font-weight: 600; }
+code { color: #14532d; }
+.register-table { table-layout: fixed; width: 120ch; margin: 16px 0 28px; }
+.register-section { margin: 16px 0 28px; }
+.register-title { margin: 0 0 8px; font-size: 16px; font-weight: 700; }
+.register-section .register-table { margin: 0; }
+.register-table th { background: #b8b8b8; position: static; font-weight: 700; }
+.register-table td { background: #fff; vertical-align: top; }
+.register-table .field-description { white-space: pre-wrap; }
+.content > details, #address-map { scroll-margin-top: 16px; }
+.register-table { scroll-margin-top: 16px; }
+@media (max-width: 900px) {
+  .page-shell { grid-template-columns: 1fr; }
+  .page-shell.sidebar-collapsed { grid-template-columns: 1fr; }
+  .sidebar {
+    position: sticky;
+    z-index: 10;
+    height: auto;
+    max-height: 38vh;
+    border-right: 0;
+    border-bottom: 1px solid #c9ced6;
+  }
+  .sidebar nav { width: 100%; flex-direction: row; overflow-x: auto; }
+  .nav-module-group { margin-left: 0; flex: 0 0 auto; }
+  .nav-registers { display: none; }
+  .content { padding: 18px 16px; }
+}
+</style>
+</head>
+<body>
+<div class="page-shell sidebar-collapsed">
+<aside class="sidebar">
+<div class="sidebar-header">
+<button class="sidebar-toggle" type="button" data-testid="sidebar-toggle"
+        aria-label="Expand navigation" title="Expand navigation">
+<span class="toggle-icon" aria-hidden="true">
+<span></span><span></span><span></span>
+</span>
+</button>
+<div class="sidebar-title">{{ module_name }} Register Tree</div>
+</div>
+<nav><a class="nav-address" href="#address-map">Address Map</a>{% for node in nodes %}<details class="nav-module-group" style="--depth:{{ node.depth }}"><summary class="nav-module">{{ node.section_number }} {{ node.display_name }}</summary><div class="nav-registers">{% for reg in node.registers %}<a class="nav-register" href="#{{ reg.anchor }}">{{ reg.name }} ({{ reg.address }})</a>{% endfor %}</div></details>{% endfor %}</nav>
+</aside>
+<main class="content">
+<h1>{{ module_name }} Register Tree</h1>
+<h2 id="address-map">Address Map</h2>
+<div class="table-scroll">
+<table class="address-table"><colgroup><col style="width:30ch"><col style="width:30ch"><col style="width:30ch"></colgroup><thead><tr><th>block</th><th>address_range</th><th>bytesize</th></tr></thead><tbody>{% for node in nodes %}<tr><td><a href="#{{ node.anchor }}">{{ node.section_number }} {{ node.display_name }}</a></td><td>{{ node.address_range }}</td><td>{{ node.bytesize }}</td></tr>{% endfor %}</tbody></table>
+</div>
+{% for node in nodes %}
+<details id="{{ node.anchor }}" open><summary>{{ node.section_number }} {{ node.display_name }}</summary>{% for reg in node.registers %}<section class="register-section"><h3 class="register-title" id="{{ reg.anchor }}">{{ reg.name }} ({{ reg.address }})</h3><table class="register-table" data-register="{{ reg.name }}"><colgroup><col style="width:20ch"><col style="width:20ch"><col style="width:20ch"><col style="width:60ch"></colgroup><tbody><tr><th class="meta-label">reg_name</th><td class="meta-value">{{ reg.name }}</td><th class="meta-label">address</th><td class="meta-value">{{ reg.address }}</td></tr><tr><th class="meta-label">reg_type</th><td class="meta-value">{{ reg.reg_type }}</td><th class="meta-label">special</th><td class="meta-value">{{ reg.special }}</td></tr><tr><th class="meta-label">SW_access</th><td class="meta-value" colspan="3">{{ reg.sw_access }}</td></tr>{% if reg.fields %}<tr><th class="field-name">field</th><th class="field-bit">bit_scope</th><th class="field-default">default_value</th><th class="field-description">description</th></tr>{% for field in reg.fields %}<tr><td class="field-name">{{ field.name }}</td><td class="field-bit">{{ field.bit_scope }}</td><td class="field-default">{{ field.default_value }}</td><td class="field-description">{{ field.description }}</td></tr>{% endfor %}{% endif %}</tbody></table></section>{% endfor %}</details>
+{% endfor %}
+</main>
+</div>
+<script>
+(function () {
+  var shell = document.querySelector(".page-shell");
+  var button = document.querySelector(".sidebar-toggle");
+  function updateButton() {
+    var collapsed = shell.classList.contains("sidebar-collapsed");
+    var label = collapsed ? "Expand navigation" : "Collapse navigation";
+    button.setAttribute("aria-label", label);
+    button.setAttribute("title", label);
+  }
+  button.addEventListener("click", function () {
+    shell.classList.toggle("sidebar-collapsed");
+    updateButton();
+  });
+  updateButton();
+}());
+</script>
+</body>
+</html>
