@@ -148,3 +148,42 @@
 4. **Markdown 表格完美对齐**:
    - 增加了 `_format_markdown_table` 辅助函数，在生成 `.md` 和 `_reg_tree.md` 文件时，会自动计算每一列内容的最大宽度，并使用空格进行填充对齐。
    - 现在生成的 Markdown 表格源码非常整齐，即使在纯文本编辑器中阅读也一目了然。
+
+
+# CSR Tool 当前状态摘要
+
+当前 `csr_tool` 已基本完成文档、RTL、TB/RAL 和 Firmware Header 生成链路，主要规范以 `README.md`、`doc/reg_template.md`、`doc/gpt_prompt.md` 和 `com/doc/coding_style.md` 为准。
+
+## 已完成重点
+
+- 输入支持 Markdown 和 XLSX；JSON 寄存器输入/输出已删除。
+- nested 模式可生成 tree Markdown、HTML、XLSX；HTML 使用 `src/tree.html.j2` 和 Jinja2，缺少 Jinja2 时只跳过 HTML。
+- RTL 端口顺序为 `clk/rst_n/clear`、CSR RX、CSR TX、寄存器接口；端口列和逗号按 coding style 对齐。
+- RTL 中 `clear` 为同步清零，必须写成 `if (!rst_n)` 后接 `else if (clear)`。
+- slave/mem 选择统一使用 `SLV_` 语义和 `SLV_<BLOCK>_ADDR_S/E` localparam，不再使用 `TARGET_`。
+- 空洞读返回统一为 `CSR_INVALID_RDATA = 32'hDEAFDEAF`。
+- Firmware 推荐输出为 `all_reg_addr.h` 和 `all_reg_type.h`；`c_legacy/` 只保留 field shift/mask/get/set 宏。
+- block `SIZE/END_ADDR` 已合入 `all_reg_addr.h`，不再生成 `c_legacy/<top>_block_macros.h`。
+
+## 当前验证结果
+
+最近验证：
+
+```bash
+python -B -m compileall -q src
+python -B -m unittest -v
+python -B src/autogen_reg.py -i input/top_reg.md --nested -o out
+```
+
+结果：
+
+- `unittest`：13/13 pass。
+- `top_reg.md --nested`：生成 42 个文件。
+- `out/firmware/c_legacy/`：只剩 `top_field_macros.h`。
+
+## 后续接手注意
+
+- 继续开发时优先阅读 `doc/gpt_prompt.md` 最后的“近期工作交接”章节。
+- README 每个自然段保持一行，Markdown 表格需要对齐。
+- 所有生成 RTL 必须继续跟随 `com/doc/coding_style.md`。
+- 不要恢复 JSON 寄存器输入/输出，也不要重新生成 `top_block_macros.h`。

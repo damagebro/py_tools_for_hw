@@ -1025,7 +1025,7 @@ out/firmware/c_legacy/<root>_field_macros.h
 
 ## 13. 自动测试
 
-使用标准库 `unittest`，文件为 `test_parser.py`。至少实现以下 8 项：
+使用标准库 `unittest`，文件为 `test_parser.py`。当前至少实现以下 13 项：
 
 1. nested address map 和重复 reg_name 去重。
    - 检查 `test1..test4`。
@@ -1060,13 +1060,32 @@ out/firmware/c_legacy/<root>_field_macros.h
    - 只显示合并后的 `SW_access`。
    - 不显示独立的 `SW` 或 `HW` 表头。
 
+9. tree Markdown 绝对地址和层级编号。
+   - Address Map path 使用 `1 top`、`1.1 mid_a`、`1.1.2 leaf_a2_u1` 这类编号。
+   - tree 模式每个寄存器显示 system base 加各级 offset 后的绝对地址。
+
+10. tree Excel 绝对地址。
+    - XLSX 输出与 tree Markdown 的绝对地址一致。
+
+11. VHDL 保留字检查。
+    - 字段名命中 VHDL keyword 时必须报 `reserved keyword`。
+
+12. Firmware c_legacy field 宏。
+    - 生成 `c_legacy/<top>_field_macros.h`。
+    - 不再生成 `c_legacy/<top>_block_macros.h`。
+    - field 宏列对齐，并包含 `_LSB/_MSB/_WIDTH/_MASK/_GET/_SET`。
+
+13. Firmware 推荐 header default 和 block size/end。
+    - `all_reg_addr.h` 包含 source block offset/default、实例 absolute addr/default、实例 `SIZE/END_ADDR`。
+    - `all_reg_type.h` 包含 block 分隔注释和 `<block>_block_reg_set_default()`。
+
 运行：
 
 ```bash
 python -B -m unittest -v
 ```
 
-预期：8 项全部通过。
+预期：13 项全部通过。
 
 ---
 
@@ -1084,7 +1103,7 @@ python -B src/autogen_reg.py -i input/top_reg.md --nested -o out
 python -B src/autogen_reg.py -i input/xlsx/top.xlsx --nested -o out/from_xlsx
 ```
 
-Markdown top nested 当前应生成 41 个文件：
+Markdown top nested 当前应生成 42 个文件：
 
 - 文档：每个节点 Markdown + tree Markdown/HTML/XLSX。
 - RTL：5 个唯一模块，每个 4 个文件，共 20。
@@ -1101,7 +1120,7 @@ Markdown top nested 当前应生成 41 个文件：
 当前基准：
 
 ```text
-Python unittest:       11/11 pass
+Python unittest:       13/13 pass
 SV syntax:             30 files, 0 failures
 RTL + TB semantics:     5 pairs, 0 failures
 ```
@@ -1142,7 +1161,7 @@ git diff --check
 10. `reg_gen_tb.py`
 11. CLI
 12. XLSX 转换脚本
-13. 全部 11 项单测
+13. 全部 13 项单测
 14. 两种输入 nested 端到端
 15. SV 语法、语义、风格和 whitespace 验收
 
@@ -1156,3 +1175,67 @@ RegisterModel，不要为了通过样例而硬编码模块名。
 - 两种输入是否端到端通过。
 - SV 语法和语义检查结果。
 - 当前环境无法执行的检查。
+
+---
+
+## 16. 近期工作交接
+
+本节记录 2026-07 附近的最新实现状态，后续让 GPT 或其它 coding agent 重新生成/继续开发时，必须优先对齐这些行为。
+
+### 16.1 当前推荐输出形态
+
+- 文档输出：Markdown、XLSX、HTML。HTML 使用 `src/tree.html.j2` 和 Jinja2 模板生成；没有安装 Jinja2 时只跳过 HTML，Markdown、RTL、TB、Firmware 仍可运行。
+- HTML tree 页面不显示 Overview 节点；侧边栏默认折叠，标题可折叠；寄存器导航显示 `reg_name(0xADDR)`；每个 block 下的寄存器详情标题显示 `reg_name(0xADDR)`，表格内的 `reg_name` 不带括号地址。
+- tree Markdown/XLSX 使用绝对地址。block 路径显示为 `1 top`、`1.1 mid_a`、`1.1.2 leaf_a2_u1` 这类编号加当前 block 名，不展开完整层级路径。
+- tree 中重复 block 实例必须都保留，例如 `leaf_a2_u1` 和 `leaf_a2_u2`。
+- field 表格列使用 `bit_scope`，格式为 `[msb:lsb]`，不再展开单独 `msb/lsb` 两列。
+- `SW/HW` 合并为 `SW_access`；其它表头使用工具当前定义，不必照搬参考截图的命名。
+
+### 16.2 RTL 生成交接
+
+- RTL 端口顺序固定为 `clk/rst_n/clear`、CSR RX、CSR TX slave/mem bus、最后 csr_register 相关信号。
+- 端口声明必须按 `coding_style.md` 对齐，逗号列一致；末尾使用 `//,` 风格保留列对齐。
+- 参数声明使用 `parameter CSR_AW = 32` 形式，不写 `parameter integer`。
+- `clear` 是高有效同步清零；时序块必须写成先 `if (!rst_n)`，再 `else if (clear)`，禁止 `if (!rst_n || clear)`。
+- DFF 分支内只有一条赋值时省略 `begin/end`。
+- slave/mem 选择统一使用 `SLV_` 语义，不使用 `TARGET_`。selector localparam 和 `SLV_<BLOCK>_ADDR_S/E` 写在一块。
+- 每个 slave/mem 地址范围使用 localparam，例如 `SLV_MID_A_ADDR_S/E`；后续 demux 和地址转换都引用 localparam，不直接写 `CSR_AW'(32'h...)` 字面量。
+- TX bus 注释可在 `o_tx_csr_req_write` 后使用单行注释说明 `[0]=xx_block, [1]=xx_block`。
+- `xx_fire` 表示握手成功；`xx_accept` 命名应替换成 `xx_fire` 语义。
+- request/write/read 条件应抽成内部信号，例如 `b_local_write_fire`，减少长 if 条件重复。
+- slave 范围判断、TX valid assign 等可读的一行表达式保持单行，避免无意义换行。
+- outstanding 计数使用 `r_otf_cnt <= r_otf_cnt + b_read_fire - b_rsp_fire;`，不使用 case。
+- `r_otf_cnt` 和 `r_read_slv` 拆分 always 块；`otf_cnt` 需要在 `else if` 条件下才赋值。
+- local read 空洞地址返回 `CSR_INVALID_RDATA`，当前值为 `32'hDEAFDEAF`；`w_local_rdata` 和最终 `w_rsp_rdata` 的空洞返回必须一致。
+- `w_local_rdata` 使用 case 赋值，先给默认值，只有匹配寄存器时覆盖对应 bits。
+- 写寄存器时保留未写 byte，使用 `i_csr_req_wdata & w_csr_wmask` 和原值非 mask 部分组合；不要保留冗余的 `(r_xxx & ~mask)` 写法在全字段赋值场景。
+
+### 16.3 Firmware 交接
+
+- nested 模式生成三个 firmware header：
+  - `out/firmware/<root>_all_reg_addr.h`
+  - `out/firmware/<root>_all_reg_type.h`
+  - `out/firmware/c_legacy/<root>_field_macros.h`
+- 不再生成 `out/firmware/c_legacy/<root>_block_macros.h`；若旧文件存在，重新生成时应删除。
+- `all_reg_addr.h` 是推荐地址宏入口，包含 source block 的 register offset/default，以及每个 tree 实例的 `BASE_ADDR/SIZE/END_ADDR/ADDR/DEFAULT`。
+- 重复 block 实例使用 `_u1/_u2` 命名，例如 `NPU_LEAF_A2_U1_SIZE`、`NPU_LEAF_A2_U2_END_ADDR`。
+- `all_reg_type.h` 是推荐类型入口，包含 union/struct 和每个 block 的 `static inline void <block>_block_reg_set_default(<block>_block_reg_ts *regs)`。
+- `c_legacy/` 只作为旧式 C field 宏兼容层，当前只保留 field shift/mask/get/set 宏。
+- 宏定义要按 block 内最长宏名对齐；block 之间允许各自独立对齐。
+
+### 16.4 README 和测试交接
+
+- README 章节当前推荐结构是先用户使用、输入格式、输出说明，再 RTL 集成说明，最后开发指南。
+- README 每个自然段写成一行；Markdown 表格需要手工对齐。
+- JSON register 输入/输出支持已经删除；只保留文档配图使用的 WaveDrom JSON。
+- `requirements.txt` 当前只需要 `jinja2>=3.1,<4` 和 `openpyxl>=3.1,<4`。
+- 当前核心验证命令：
+
+```bash
+python -B -m compileall -q src
+python -B -m unittest -v
+python -B src/autogen_reg.py -i input/top_reg.md --nested -o out
+git diff --check -- README.md doc/gpt_prompt.md src/reg_gen_firmware.py test_parser.py
+```
+
+- 最近一次已验证结果：`compileall` 通过，`unittest 13/13 pass`，`input/top_reg.md --nested` 生成 42 个文件，`out/firmware/c_legacy/` 下只剩 `top_field_macros.h`。
