@@ -557,6 +557,145 @@ class ParserTests(unittest.TestCase):
             self.assertIn("| 0xF0001000 | mid_cfg", tree)
             self.assertIn("| 0xF0001100 | ver", tree)
 
+    def test_firmware_legacy_c_macros_are_generated(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            generated = run(
+                str(ROOT / "input" / "top_reg.md"),
+                temp,
+                nested=True,
+            )
+            legacy_dir = Path(temp) / "firmware" / "c_legacy"
+            field_path = legacy_dir / "top_field_macros.h"
+            self.assertIn(field_path, generated)
+            self.assertNotIn(legacy_dir / "top_block_macros.h", generated)
+            self.assertFalse((legacy_dir / "top_block_macros.h").exists())
+
+            field = field_path.read_text(encoding="utf-8")
+            self.assertIn("#define LEAF_A2_CONFIG_MODE_LSB        0U", field)
+            self.assertIn("#define LEAF_A2_CONFIG_MODE_MSB        7U", field)
+            self.assertIn("#define LEAF_A2_CONFIG_MODE_WIDTH      8U", field)
+            self.assertIn(
+                "#define LEAF_A2_CONFIG_MODE_MASK       0x000000FFU",
+                field,
+            )
+            self.assertIn(
+                "#define LEAF_A2_CONFIG_MODE_GET(value) "
+                "(((value) & LEAF_A2_CONFIG_MODE_MASK) >> "
+                "LEAF_A2_CONFIG_MODE_LSB)",
+                field,
+            )
+            self.assertIn(
+                "#define LEAF_A2_CONFIG_MODE_SET(value) "
+                "(((value) << LEAF_A2_CONFIG_MODE_LSB) & "
+                "LEAF_A2_CONFIG_MODE_MASK)",
+                field,
+            )
+            leaf_a2_defines = [
+                line for line in field.splitlines()
+                if line.startswith("#define LEAF_A2_")
+            ]
+            self.assertEqual(
+                1,
+                len({
+                    line.index("0x")
+                    if " 0x" in line else line.index("(((value)")
+                    if " (((value)" in line else line.rindex(" ") + 1
+                    for line in leaf_a2_defines
+                }),
+            )
+
+    def test_firmware_recommended_headers_include_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            run(
+                str(ROOT / "input" / "top_reg.md"),
+                temp,
+                nested=True,
+            )
+            firmware_dir = Path(temp) / "firmware"
+            addr = (firmware_dir / "top_all_reg_addr.h").read_text(
+                encoding="utf-8"
+            )
+
+            def assert_define(name: str, value: str) -> None:
+                for line in addr.splitlines():
+                    if line.startswith(f"#define {name} "):
+                        self.assertEqual(value, line.split(None, 2)[2])
+                        return
+                self.fail(f"missing macro {name}")
+
+            assert_define("NPU_TOP_TOP_VER_DEFAULT", "TOP_TOP_VER_DEFAULT")
+            assert_define("NPU_TOP_SIZE", "0x00010000U")
+            assert_define("NPU_TOP_END_ADDR", "0xF000FFFFU")
+            assert_define(
+                "NPU_LEAF_A2_U1_CONFIG_DEFAULT",
+                "LEAF_A2_CONFIG_DEFAULT",
+            )
+            assert_define("NPU_LEAF_A2_U1_SIZE", "0x00000100U")
+            assert_define("NPU_LEAF_A2_U1_END_ADDR", "0xF00012FFU")
+            assert_define(
+                "NPU_LEAF_A2_U2_CONFIG_DEFAULT",
+                "LEAF_A2_CONFIG_DEFAULT",
+            )
+            assert_define("NPU_LEAF_A2_U2_SIZE", "0x000000C0U")
+            assert_define("NPU_LEAF_A2_U2_END_ADDR", "0xF00021BFU")
+            top_defines = [
+                line for line in addr.splitlines()
+                if line.startswith("#define TOP_") and " 0x" in line
+            ]
+            self.assertEqual(
+                1,
+                len({line.index("0x") for line in top_defines}),
+            )
+            npu_top_defines = [
+                line for line in addr.splitlines()
+                if line.startswith("#define NPU_TOP_")
+            ]
+            self.assertEqual(
+                1,
+                len({
+                    line.index("0x")
+                    if " 0x" in line else line.index("(")
+                    if " (" in line else line.rindex(" ") + 1
+                    for line in npu_top_defines
+                }),
+            )
+
+            types = (firmware_dir / "top_all_reg_type.h").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn(
+                "// -----------------------------------------------------------------------------\n"
+                "// top block\n"
+                "// -----------------------------------------------------------------------------",
+                types,
+            )
+            self.assertIn(
+                "// -----------------------------------------------------------------------------\n"
+                "// leaf_a2 block\n"
+                "// -----------------------------------------------------------------------------",
+                types,
+            )
+            self.assertIn(
+                "static inline void top_block_reg_set_default(",
+                types,
+            )
+            self.assertIn(
+                "regs->top_ver.word = TOP_TOP_VER_DEFAULT;",
+                types,
+            )
+            self.assertIn(
+                "regs->test1[3].word = TOP_TEST1_3_DEFAULT;",
+                types,
+            )
+            self.assertIn(
+                "static inline void leaf_a2_block_reg_set_default(",
+                types,
+            )
+            self.assertIn(
+                "regs->config.word = LEAF_A2_CONFIG_DEFAULT;",
+                types,
+            )
+
     def test_tree_excel_uses_absolute_addresses(self) -> None:
         try:
             import openpyxl

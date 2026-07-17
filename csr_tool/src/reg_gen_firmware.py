@@ -7,6 +7,9 @@ from .models import ModuleModel, RegisterModel
 from .reg_common import hex_width, write_text
 
 
+InstanceNode = tuple[ModuleModel, int, tuple[str, ...], int, str]
+
+
 def generate_firmware(
     module: ModuleModel,
     out_dir: str,
@@ -19,16 +22,20 @@ def generate_firmware(
     prefix = (module.base_info.system_prefix or module.name).lower()
     addr_path = output / f"{module.name}_all_reg_addr.h"
     type_path = output / f"{module.name}_all_reg_type.h"
+    legacy_dir = output / "c_legacy"
+    field_path = legacy_dir / f"{module.name}_field_macros.h"
+    stale_block_path = legacy_dir / f"{module.name}_block_macros.h"
     write_text(addr_path, _address_header(module, prefix, addr_path.name))
     write_text(type_path, _type_header(module, addr_path.name, type_path.name))
-    return [addr_path, type_path]
+    write_text(field_path, _legacy_field_header(module, field_path.name))
+    if stale_block_path.exists():
+        stale_block_path.unlink()
+    return [addr_path, type_path, field_path]
 
 
 def _address_header(module: ModuleModel, prefix: str, filename: str) -> str:
     guard = _guard(filename)
     nodes = list(module.walk())
-    block_counts = Counter(item.name for item, _, _ in nodes)
-    block_indexes: defaultdict[str, int] = defaultdict(int)
     lines = [
         f"#ifndef {guard}",
         f"#define {guard}",
@@ -43,6 +50,7 @@ def _address_header(module: ModuleModel, prefix: str, filename: str) -> str:
             continue
         seen_sources.add(source)
         lines.append(f"// {block.name} register offsets")
+        defines: list[tuple[str, str]] = []
         for reg in block.registers:
             if reg.reg_type in {"slave", "mem"}:
                 continue
@@ -51,36 +59,51 @@ def _address_header(module: ModuleModel, prefix: str, filename: str) -> str:
                 reg_tag = f"{reg.name}_{index}" if index is not None else reg.name
                 offset = reg.offset + (index or 0) * block.word_bytes
                 width = hex_width(max(32, block.base_info.reg_bitwidth))
-                lines.append(
-                    f"#define {block.name.upper()}_{reg_tag.upper()}_OFFSET "
-                    f"0x{offset:0{width}X}U"
+                defines.append(
+                    (
+                        f"{block.name.upper()}_{reg_tag.upper()}_OFFSET",
+                        f"0x{offset:0{width}X}U",
+                    )
                 )
-                lines.append(
-                    f"#define {block.name.upper()}_{reg_tag.upper()}_DEFAULT "
-                    f"0x{reg.default_word(index or 0):0{width}X}U"
+                defines.append(
+                    (
+                        f"{block.name.upper()}_{reg_tag.upper()}_DEFAULT",
+                        f"0x{reg.default_word(index or 0):0{width}X}U",
+                    )
                 )
+        lines.extend(_define_lines(defines))
         lines.append("")
 
     lines.append("// Absolute address map")
-    for block, base, path in nodes:
-        block_indexes[block.name] += 1
-        unique = block.name
-        if block_counts[block.name] > 1:
-            unique = f"{block.name}_u{block_indexes[block.name]}"
+    for block, base, path, size, unique in _instance_nodes(module):
         block_tag = f"{prefix}_{unique}".upper()
         lines.append(f"// {'/'.join(path)}")
-        lines.append(f"#define {block_tag}_BASE_ADDR 0x{base:08X}U")
+        end_addr = base + max(1, size) - 1
+        defines = [
+            (f"{block_tag}_BASE_ADDR", f"0x{base:08X}U"),
+            (f"{block_tag}_SIZE", _c_hex(size, 32)),
+            (f"{block_tag}_END_ADDR", _c_hex(end_addr, 32)),
+        ]
         for reg in block.registers:
             if reg.reg_type in {"slave", "mem"}:
                 continue
             suffixes = range(reg.repeat) if reg.repeat > 1 else [None]
             for index in suffixes:
                 reg_tag = f"{reg.name}_{index}" if index is not None else reg.name
-                lines.append(
-                    f"#define {block_tag}_{reg_tag.upper()}_ADDR "
-                    f"({block_tag}_BASE_ADDR + "
-                    f"{block.name.upper()}_{reg_tag.upper()}_OFFSET)"
+                defines.append(
+                    (
+                        f"{block_tag}_{reg_tag.upper()}_ADDR",
+                        f"({block_tag}_BASE_ADDR + "
+                        f"{block.name.upper()}_{reg_tag.upper()}_OFFSET)",
+                    )
                 )
+                defines.append(
+                    (
+                        f"{block_tag}_{reg_tag.upper()}_DEFAULT",
+                        f"{block.name.upper()}_{reg_tag.upper()}_DEFAULT",
+                    )
+                )
+        lines.extend(_define_lines(defines))
         lines.append("")
     lines.extend([f"#endif // {guard}"])
     return "\n".join(lines)
@@ -105,6 +128,7 @@ def _type_header(module: ModuleModel, addr_filename: str, filename: str) -> str:
             continue
         seen_sources.add(source)
         scalar = "uint64_t" if block.base_info.reg_bitwidth > 32 else "uint32_t"
+        lines.extend(_block_separator(block.name))
         for reg in block.registers:
             if reg.reg_type in {"slave", "mem"}:
                 continue
@@ -122,6 +146,90 @@ def _type_header(module: ModuleModel, addr_filename: str, filename: str) -> str:
             f"}} {block.name}_block_reg_ts;",
             "",
         ])
+        lines.extend(_block_default_function(block))
+    lines.append(f"#endif // {guard}")
+    return "\n".join(lines)
+
+
+def _block_default_function(block: ModuleModel) -> list[str]:
+    lines = [
+        f"static inline void {block.name}_block_reg_set_default(",
+        f"    {block.name}_block_reg_ts *regs",
+        ") {",
+        "    if (!regs) {",
+        "        return;",
+        "    }",
+    ]
+    for reg in block.registers:
+        if reg.reg_type in {"slave", "mem"}:
+            continue
+        if reg.repeat > 1:
+            for index in range(reg.repeat):
+                reg_tag = f"{reg.name}_{index}"
+                lines.append(
+                    f"    regs->{reg.name}[{index}].word = "
+                    f"{block.name.upper()}_{reg_tag.upper()}_DEFAULT;"
+                )
+        else:
+            lines.append(
+                f"    regs->{reg.name}.word = "
+                f"{block.name.upper()}_{reg.name.upper()}_DEFAULT;"
+            )
+    lines.extend([
+        "}",
+        "",
+    ])
+    return lines
+
+
+def _block_separator(block_name: str) -> list[str]:
+    return [
+        "// -----------------------------------------------------------------------------",
+        f"// {block_name} block",
+        "// -----------------------------------------------------------------------------",
+        "",
+    ]
+
+
+def _legacy_field_header(module: ModuleModel, filename: str) -> str:
+    guard = _guard(filename)
+    lines = [
+        f"#ifndef {guard}",
+        f"#define {guard}",
+        "",
+        "// Legacy C-compatible field mask and shift macros.",
+        "",
+    ]
+    seen_sources: set[str] = set()
+    for block, _, _ in module.walk():
+        source = str(Path(block.source_path).resolve()).lower()
+        if source in seen_sources:
+            continue
+        seen_sources.add(source)
+        lines.append(f"// {block.name} fields")
+        defines: list[tuple[str, str]] = []
+        for reg in block.registers:
+            if reg.reg_type in {"slave", "mem"}:
+                continue
+            for field in reg.fields:
+                tag = f"{block.name}_{reg.name}_{field.name}".upper()
+                mask = ((1 << field.width) - 1) << field.lsb
+                defines.extend([
+                    (f"{tag}_LSB", f"{field.lsb}U"),
+                    (f"{tag}_MSB", f"{field.msb}U"),
+                    (f"{tag}_WIDTH", f"{field.width}U"),
+                    (f"{tag}_MASK", _c_hex(mask, block.base_info.reg_bitwidth)),
+                    (
+                        f"{tag}_GET(value)",
+                        f"(((value) & {tag}_MASK) >> {tag}_LSB)",
+                    ),
+                    (
+                        f"{tag}_SET(value)",
+                        f"(((value) << {tag}_LSB) & {tag}_MASK)",
+                    ),
+                ])
+        lines.extend(_define_lines(defines))
+        lines.append("")
     lines.append(f"#endif // {guard}")
     return "\n".join(lines)
 
@@ -160,6 +268,52 @@ def _register_union(
         "",
     ])
     return lines
+
+
+def _instance_nodes(module: ModuleModel) -> list[InstanceNode]:
+    raw_nodes: list[tuple[ModuleModel, int, tuple[str, ...], int]] = []
+
+    def visit(
+        item: ModuleModel,
+        absolute_base: int,
+        path: tuple[str, ...],
+        allocated_size: int,
+    ) -> None:
+        current_path = path + (item.name,)
+        raw_nodes.append((item, absolute_base, current_path, allocated_size))
+        for child in item.sub_modules:
+            visit(
+                child.module_obj,
+                absolute_base + child.offset,
+                current_path,
+                child.bytesize,
+            )
+
+    root_size = module.base_info.system_bytesize or module.local_size
+    visit(module, module.base_info.system_baseaddr, (), root_size)
+    name_counts = Counter(item.name for item, _, _, _ in raw_nodes)
+    name_indexes: defaultdict[str, int] = defaultdict(int)
+    nodes: list[InstanceNode] = []
+    for item, base, path, size in raw_nodes:
+        name_indexes[item.name] += 1
+        unique_name = item.name
+        if name_counts[item.name] > 1:
+            unique_name = f"{item.name}_u{name_indexes[item.name]}"
+        nodes.append((item, base, path, size, unique_name))
+    return nodes
+
+
+def _c_hex(value: int, bitwidth: int) -> str:
+    width = max(8, hex_width(max(32, bitwidth)))
+    suffix = "ULL" if bitwidth > 32 or value > 0xFFFFFFFF else "U"
+    return f"0x{value:0{width}X}{suffix}"
+
+
+def _define_lines(defines: list[tuple[str, str]]) -> list[str]:
+    if not defines:
+        return []
+    name_width = max(len(name) for name, _ in defines)
+    return [f"#define {name:<{name_width}} {value}" for name, value in defines]
 
 
 def _guard(filename: str) -> str:

@@ -970,6 +970,7 @@ generate_firmware(module, out_dir, is_nested=False) -> list[Path]
 ```text
 out/firmware/<root>_all_reg_addr.h
 out/firmware/<root>_all_reg_type.h
+out/firmware/c_legacy/<root>_field_macros.h
 ```
 
 ### 11.1 addr header
@@ -979,6 +980,8 @@ out/firmware/<root>_all_reg_type.h
 - repeat 每个实例独立宏，名字带 `_0`、`_1`。
 - 不为 slave/mem 生成寄存器宏。
 - 按树顺序生成每个节点 base address 和每个寄存器 absolute address。
+- 每个树节点实例同时生成 `_SIZE` 和 `_END_ADDR`。
+- absolute address 区同时生成实例级 default 宏，例如 `<PREFIX>_<BLOCK>_<REG>_DEFAULT` 指向 source block 的 `<BLOCK>_<REG>_DEFAULT`。
 - `system_prefix` 为空时使用 root module 名。
 - 同名 block 在树中出现多次时，实例地址前缀使用 `_u1`、`_u2`。
 
@@ -993,8 +996,16 @@ out/firmware/<root>_all_reg_type.h
   - `word` 标量。
 - 每个 block 生成 `<block>_block_reg_ts`。
 - repeat 成为 C 数组。
+- 每个 block 生成 `static inline void <block>_block_reg_set_default(<block>_block_reg_ts *regs)`，逐个 `.word` 写入对应 default 宏；函数只操作传入指针，不定义静态对象。
 - Header 只能包含宏和类型声明，不定义静态对象，不分配程序存储空间。
 - 注释使用英文 `//`。
+
+### 11.3 legacy C compatibility header
+
+- `c_legacy/<root>_field_macros.h` 生成每个 field 的 `_LSB`、`_MSB`、`_WIDTH`、`_MASK`、`_GET(value)` 和 `_SET(value)`。
+- field 宏使用 `<BLOCK>_<REG>_<FIELD>` 前缀，只针对唯一 source block 生成一次。
+- 重复 block 实例的 block size/end 宏在 `all_reg_addr.h` 内使用 `_u1`、`_u2` 命名。
+- `c_legacy/` 是旧式 C 宏兼容层，推荐接口仍然是 `all_reg_addr/type` 两个顶层 header。
 
 ---
 
@@ -1078,7 +1089,7 @@ Markdown top nested 当前应生成 41 个文件：
 - 文档：每个节点 Markdown + tree Markdown/HTML/XLSX。
 - RTL：5 个唯一模块，每个 4 个文件，共 20。
 - TB/RAL：5 个唯一模块，每个 2 个文件，共 10。
-- Firmware：2 个 Header。
+- Firmware：2 个推荐 Header + 1 个 `c_legacy` 兼容 Header。
 
 若环境存在 `pyslang`，增加：
 

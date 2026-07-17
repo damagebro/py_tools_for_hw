@@ -216,12 +216,13 @@ out/rtl/plus/tmp_<block>.sv
 
 Firmware Header 仅在 nested 模式生成：
 
-| 文件                     | 内容                                                |
-| :----------------------- | :-------------------------------------------------- |
-| `<top>_all_reg_addr.h`   | block base、register offset/default 和绝对地址宏    |
-| `<top>_all_reg_type.h`   | 寄存器 union/struct 类型                            |
+| 文件                            | 内容                                                                       |
+| :------------------------------ | :------------------------------------------------------------------------- |
+| `<top>_all_reg_addr.h`          | block base/size/end、register offset/default、绝对地址和实例 default 宏    |
+| `<top>_all_reg_type.h`          | 寄存器 union/struct 类型和 default 初始化函数                              |
+| `c_legacy/<top>_field_macros.h` | C 兼容 field shift/mask/get/set 宏                                         |
 
-type header 不分配静态寄存器镜像存储空间。
+type header 不分配静态寄存器镜像存储空间，default 初始化函数只给调用方传入的 struct 赋值。`c_legacy/` 目录用于旧式 C field 宏兼容场景，block size/end 已合入 `all_reg_addr.h`。
 
 ## 6. RTL 集成说明
 
