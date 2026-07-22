@@ -1,375 +1,651 @@
-# -*- coding: utf-8 -*-
-'''
-usage: python gen_rtl_inst.py <fn_rtl>
-func: gen rtl instance
-input: <RTL_FILE>.v
-output: inst.v with module instance
-'''
+#!/usr/bin/env python3
+from __future__ import annotations
 
-import os,sys,re
-from deal_str_common import*
+import argparse
+import re
+import sys
+from dataclasses import dataclass
+from pathlib import Path
 
-#string condition test----------------------------------------------------
-def is_null_str( s ):
-    size = len( s.split() )
-    return size==0 #以空白符 作为分隔符， 若字符串全是空白符， 分割后数组大小为0
 
-#deal comment-------------------------------------------------------------
-def del_wordline_cmt( li_str ):
-    'func: delete <anychar>//comment, if <anychar> not null or whitespace, delete the comment after //'
-    comment_mark = '//'
-    li_ret = []
-    for s in li_str:
-        if( str_find( comment_mark )>0 ):
-            li = s.split( comment_mark,1 )
-            if( len(li[0].spilt()) ):  #注释前 存在非空白字符， 则删除 行注释
-                li_ret.append( li[0] )
+IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_$]*")
+DIRECTION_SET = {"input", "output", "inout"}
+NET_TYPES = {
+    "wire",
+    "tri",
+    "tri0",
+    "tri1",
+    "wand",
+    "wor",
+    "uwire",
+    "supply0",
+    "supply1",
+}
+DATA_TYPES = {
+    "logic",
+    "bit",
+    "byte",
+    "shortint",
+    "int",
+    "longint",
+    "integer",
+    "time",
+    "reg",
+}
+TYPE_QUALIFIERS = {"signed", "unsigned", "automatic", "static", "var", "const"}
+
+
+@dataclass(frozen=True)
+class Parameter:
+    name: str
+    default: str
+
+
+@dataclass(frozen=True)
+class Port:
+    name: str
+    direction: str
+    type_text: str
+    unpacked: str = ""
+
+
+@dataclass(frozen=True)
+class ModuleInfo:
+    name: str
+    parameters: list[Parameter]
+    ports: list[Port]
+
+
+def strip_comments(text: str) -> str:
+    result: list[str] = []
+    i = 0
+    in_line = False
+    in_block = False
+    in_string = False
+    escape = False
+    while i < len(text):
+        char = text[i]
+        nxt = text[i + 1] if i + 1 < len(text) else ""
+        if in_line:
+            if char == "\n":
+                in_line = False
+                result.append(char)
+            i += 1
+            continue
+        if in_block:
+            if char == "*" and nxt == "/":
+                in_block = False
+                result.append(" ")
+                i += 2
             else:
-                li_ret.append( s )  #注释前 为空白字符， 保留行注释
+                result.append("\n" if char == "\n" else " ")
+                i += 1
+            continue
+        if in_string:
+            result.append(char)
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            i += 1
+            continue
+        if char == '"':
+            in_string = True
+            result.append(char)
+            i += 1
+            continue
+        if char == "/" and nxt == "/":
+            in_line = True
+            i += 2
+            continue
+        if char == "/" and nxt == "*":
+            in_block = True
+            result.append(" ")
+            i += 2
+            continue
+        result.append(char)
+        i += 1
+    return "".join(result)
+
+
+def split_top_level(text: str, sep: str = ",") -> list[str]:
+    parts: list[str] = []
+    start = 0
+    round_depth = 0
+    square_depth = 0
+    brace_depth = 0
+    in_string = False
+    escape = False
+    for idx, char in enumerate(text):
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+            continue
+        if char == "(":
+            round_depth += 1
+        elif char == ")":
+            round_depth = max(0, round_depth - 1)
+        elif char == "[":
+            square_depth += 1
+        elif char == "]":
+            square_depth = max(0, square_depth - 1)
+        elif char == "{":
+            brace_depth += 1
+        elif char == "}":
+            brace_depth = max(0, brace_depth - 1)
+        elif (
+            char == sep
+            and round_depth == 0
+            and square_depth == 0
+            and brace_depth == 0
+        ):
+            part = text[start:idx].strip()
+            if part:
+                parts.append(part)
+            start = idx + 1
+    tail = text[start:].strip()
+    if tail:
+        parts.append(tail)
+    return parts
+
+
+def split_assignment(text: str) -> tuple[str, str]:
+    round_depth = square_depth = brace_depth = 0
+    for idx, char in enumerate(text):
+        if char == "(":
+            round_depth += 1
+        elif char == ")":
+            round_depth = max(0, round_depth - 1)
+        elif char == "[":
+            square_depth += 1
+        elif char == "]":
+            square_depth = max(0, square_depth - 1)
+        elif char == "{":
+            brace_depth += 1
+        elif char == "}":
+            brace_depth = max(0, brace_depth - 1)
+        elif (
+            char == "="
+            and round_depth == 0
+            and square_depth == 0
+            and brace_depth == 0
+        ):
+            return text[:idx].strip(), text[idx + 1 :].strip()
+    return text.strip(), "<must_be_specified>"
+
+
+def find_matching(text: str, open_idx: int, left: str, right: str) -> int:
+    depth = 0
+    in_string = False
+    escape = False
+    for idx in range(open_idx, len(text)):
+        char = text[idx]
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+            continue
+        if char == left:
+            depth += 1
+        elif char == right:
+            depth -= 1
+            if depth == 0:
+                return idx
+    raise ValueError(f"unmatched {left}")
+
+
+def find_statement_end(text: str, start: int) -> int:
+    round_depth = square_depth = brace_depth = 0
+    for idx in range(start, len(text)):
+        char = text[idx]
+        if char == "(":
+            round_depth += 1
+        elif char == ")":
+            round_depth = max(0, round_depth - 1)
+        elif char == "[":
+            square_depth += 1
+        elif char == "]":
+            square_depth = max(0, square_depth - 1)
+        elif char == "{":
+            brace_depth += 1
+        elif char == "}":
+            brace_depth = max(0, brace_depth - 1)
+        elif (
+            char == ";"
+            and round_depth == 0
+            and square_depth == 0
+            and brace_depth == 0
+        ):
+            return idx
+    raise ValueError("missing statement semicolon")
+
+
+def normalize_space(text: str) -> str:
+    return " ".join(text.replace("\n", " ").replace("\t", " ").split())
+
+
+def first_word(text: str) -> str:
+    match = re.match(r"\s*([A-Za-z_][A-Za-z0-9_$]*)", text)
+    return match.group(1) if match else ""
+
+
+def extract_declarator(text: str) -> tuple[str, str, str]:
+    left, _ = split_assignment(text)
+    left = left.strip()
+    match = re.match(
+        r"^(?P<prefix>.*?)(?P<name>[A-Za-z_][A-Za-z0-9_$]*)"
+        r"\s*(?P<unpacked>(?:\[[^\]]+\]\s*)*)$",
+        left,
+        flags=re.S,
+    )
+    if not match:
+        raise ValueError(f"cannot parse declarator: {text}")
+    prefix = normalize_space(match.group("prefix"))
+    name = match.group("name")
+    unpacked = normalize_space(match.group("unpacked"))
+    return prefix, name, unpacked
+
+
+def parameter_from_item(item: str) -> Parameter | None:
+    item = normalize_space(item)
+    if not item or item.startswith("localparam"):
+        return None
+    if item.startswith("parameter "):
+        item = item[len("parameter ") :].strip()
+    left, default = split_assignment(item)
+    names = IDENT_RE.findall(left)
+    if not names:
+        return None
+    name = names[-1]
+    return Parameter(name=name, default=default.rstrip(","))
+
+
+def parse_parameter_items(text: str) -> list[Parameter]:
+    params: list[Parameter] = []
+    seen: set[str] = set()
+    for item in split_top_level(text):
+        param = parameter_from_item(item)
+        if param and param.name not in seen:
+            seen.add(param.name)
+            params.append(param)
+    return params
+
+
+def internal_parameter_statements(body: str) -> list[str]:
+    statements: list[str] = []
+    for match in re.finditer(r"\b(?:localparam|parameter)\b", body):
+        keyword = match.group(0)
+        if keyword == "localparam":
+            continue
+        end = find_statement_end(body, match.end())
+        statements.append(body[match.start() : end])
+    return statements
+
+
+def parse_decl_statement(statement: str) -> list[Port]:
+    statement = normalize_space(statement.rstrip(";"))
+    direction = first_word(statement)
+    if direction not in DIRECTION_SET:
+        return []
+    remain = statement[len(direction) :].strip()
+    parts = split_top_level(remain)
+    ports: list[Port] = []
+    current_type = ""
+    for idx, part in enumerate(parts):
+        prefix, name, unpacked = extract_declarator(part)
+        if idx == 0 or prefix:
+            current_type = prefix
+        ports.append(
+            Port(
+                name=name,
+                direction={"input": "i", "output": "o", "inout": "io"}[direction],
+                type_text=current_type,
+                unpacked=unpacked,
+            )
+        )
+    return ports
+
+
+def parse_ansi_ports(port_text: str) -> list[Port]:
+    ports: list[Port] = []
+    current_direction = ""
+    current_type = ""
+    for item in split_top_level(port_text):
+        item = item.strip()
+        if not item or item.startswith("`"):
+            continue
+        word = first_word(item)
+        if word in DIRECTION_SET:
+            for port in parse_decl_statement(item):
+                current_direction = port.direction
+                current_type = port.type_text
+                ports.append(port)
+            continue
+        if item.startswith("."):
+            formal = item[1:].split("(", 1)[0].strip()
+            ports.append(Port(name=formal, direction="?", type_text=""))
+            continue
+        prefix, name, unpacked = extract_declarator(item)
+        if current_direction and not prefix:
+            ports.append(
+                Port(
+                    name=name,
+                    direction=current_direction,
+                    type_text=current_type,
+                    unpacked=unpacked,
+                )
+            )
+            continue
+        ports.append(
+            Port(
+                name=name,
+                direction="if" if prefix else "?",
+                type_text=prefix,
+                unpacked=unpacked,
+            )
+        )
+    return ports
+
+
+def formal_port_names(port_text: str) -> list[tuple[str, str]]:
+    names: list[tuple[str, str]] = []
+    for item in split_top_level(port_text):
+        item = item.strip()
+        if not item or item.startswith("`"):
+            continue
+        if item.startswith("."):
+            formal = item[1:].split("(", 1)[0].strip()
+            names.append((formal, item))
+            continue
+        _, name, _ = extract_declarator(item)
+        names.append((name, item))
+    return names
+
+
+def parse_non_ansi_ports(port_text: str, body: str) -> list[Port]:
+    declared: dict[str, Port] = {}
+    for match in re.finditer(r"\b(input|output|inout)\b", body):
+        end = find_statement_end(body, match.end())
+        for port in parse_decl_statement(body[match.start() : end]):
+            declared[port.name] = port
+    ports: list[Port] = []
+    for name, raw in formal_port_names(port_text):
+        if name in declared:
+            ports.append(declared[name])
+            continue
+        prefix, formal_name, unpacked = extract_declarator(raw)
+        ports.append(
+            Port(
+                name=formal_name,
+                direction="if" if prefix else "?",
+                type_text=prefix,
+                unpacked=unpacked,
+            )
+        )
+    return ports
+
+
+def parse_module_header(header: str) -> tuple[str, str, str]:
+    match = re.match(r"\s*module\s+([A-Za-z_][A-Za-z0-9_$]*)", header)
+    if not match:
+        raise ValueError("module name not found")
+    name = match.group(1)
+    idx = match.end()
+    param_text = ""
+    while idx < len(header) and header[idx].isspace():
+        idx += 1
+    if idx < len(header) and header[idx] == "#":
+        idx += 1
+        while idx < len(header) and header[idx].isspace():
+            idx += 1
+        if idx < len(header) and header[idx] == "(":
+            end = find_matching(header, idx, "(", ")")
+            param_text = header[idx + 1 : end]
+            idx = end + 1
+    while idx < len(header) and header[idx].isspace():
+        idx += 1
+    port_text = ""
+    if idx < len(header) and header[idx] == "(":
+        end = find_matching(header, idx, "(", ")")
+        port_text = header[idx + 1 : end]
+    return name, param_text, port_text
+
+
+def parse_modules(text: str) -> list[ModuleInfo]:
+    clean = strip_comments(text)
+    modules: list[ModuleInfo] = []
+    for match in re.finditer(r"\bmodule\b", clean):
+        header_end = find_statement_end(clean, match.start())
+        end_match = re.search(r"\bendmodule\b", clean[header_end:])
+        if not end_match:
+            raise ValueError("endmodule not found")
+        body_start = header_end + 1
+        body_end = header_end + end_match.start()
+        header = clean[match.start() : header_end]
+        body = clean[body_start:body_end]
+        name, param_text, port_text = parse_module_header(header)
+        params = parse_parameter_items(param_text)
+        seen = {param.name for param in params}
+        for statement in internal_parameter_statements(body):
+            for param in parse_parameter_items(statement):
+                if param.name not in seen:
+                    seen.add(param.name)
+                    params.append(param)
+        header_ports = parse_ansi_ports(port_text)
+        has_ansi_direction = any(port.direction in {"i", "o", "io"} for port in header_ports)
+        if has_ansi_direction:
+            ports = header_ports
         else:
-            li_ret.append( s )
-    return li_ret
+            ports = parse_non_ansi_ports(port_text, body)
+        modules.append(ModuleInfo(name=name, parameters=params, ports=ports))
+    return modules
 
-def del_line_cmt( li_str ):
-    comment_mark = '//'
-    li_ret = []
-    for s in li_str:
-        li_ret.append( s.split( comment_mark,1 )[0] )
-    return li_ret
-def del_blk_cmt( li_str ):
-    li_tmp = str_couple_split( li_str, '/*','*/' )
-    li_ret = []
-    li_ret.extend( li_tmp[0] )
-    li_ret.extend( li_tmp[-1] )
 
-    return li_ret
-def del_all_cmt( li_str ):
-    li_ret = del_line_cmt( li_str ) # 行注释 比块注释 优先级更高
-    li_ret = del_blk_cmt( li_ret )
+def signal_suffix(direction: str, port_name: str) -> str:
+    if direction == "i":
+        return port_name if port_name.startswith("i_") else f"i_{port_name}"
+    if direction == "o":
+        return port_name if port_name.startswith("o_") else f"o_{port_name}"
+    if direction == "io":
+        return port_name if port_name.startswith("io_") else f"io_{port_name}"
+    if direction == "if":
+        return port_name if port_name.startswith("if_") else f"if_{port_name}"
+    return f"x_{port_name}"
 
-    return li_ret
 
-#get paramter+port list-------------------------------------------------------------
-def deal_port_name( s ):
-    str_ret = s
-    if( str_find(s,'[') ):
-        str_ret = s.split('[',1)[0]
-    return str_ret
-def parse_port_def( s ):
-    'ret: str_bit_width, str_io_direction'
-    str_bit_width = ''
-    if( str_find(s, '[') ):
-        str_couple_split_verbose_once
-        str_l = '['
-        str_r = ']'
-        li_tmp, li_match = str_couple_split_verbose_once( [s], str_l,str_r,1 )
-        s1 = ''
-        for li in li_match:
-            s1+= '{}{}{}'.format( str_l, list2str(li), str_r ); #print(s1)
-        str_bit_width = s1
+def signal_name(tag: str, port: Port) -> str:
+    return f"u_{tag}_{signal_suffix(port.direction, port.name)}"
 
-    str_io_direction = '??'
-    if( str_find(s,'input') ):
-        str_io_direction = 'i'
-    elif( str_find(s,'output') ):
-        str_io_direction = 'o'
-    elif( str_find(s,'inout') ):
-        str_io_direction = 'io'
-    # elif( str_re_find(s,'\w+\.\w+(?:.|\n)*') ):
-    #     str_io_direction = 'if'
 
-    return str_io_direction, str_bit_width
-def get_parm_list( li_str_module ):  #[parm_name, default_value, b_independent_flag]
-    '''
-    * pat1: #( parameter AW=16, DW=32 )
-    * pat2: paramter AW=16, DW=32;
-    * pat3: paramter AW=16, DW=32, SW=DW/8;
-    * pat4: paramter AW='h0__0_10, DW=32'h20;
-    * pat5: paramter AW=16, paramter DW=32;
-    * ret: list_parm = [param_name, default_val, b_independent_flag]
-    '''
-    li_parm = [] #[(str_param_name, str_default_val, b_independent_flag), ...]
-    li_str_module1 = del_all_cmt( li_str_module ); #print( list2str(li_str_module1) )
+def is_passthrough_port(port: Port) -> bool:
+    return (
+        port.direction == "i"
+        and (
+            port.name == "clk"
+            or port.name == "rst_n"
+            or port.name.endswith("_clk")
+            or port.name.endswith("_rst_n")
+        )
+    )
 
-    str_l = 'module'
-    str_r = ';'
-    b_couple_nested_flag = 0
-    li_tmp = str_couple_split( li_str_module1, str_l,str_r,b_couple_nested_flag )
-    li_rem = li_tmp[2]
-    li_module_declare = li_tmp[1]
 
-    #step1 get param list----
-    li_parm_declare   = [] #  module #( parm_decalre_list ) inst_module ( port_declare_list );
-    li_parm_statement = [] #  outside module declare,  parameter ??;
-    li_parm_raw = []  # [ '?? parm_name1 = value',  '?? parm_name2 = value', ... ]
+def connection_name(tag: str, port: Port) -> str:
+    if is_passthrough_port(port):
+        return port.name
+    return signal_name(tag, port)
 
-    ##get li_parm_declare
-    str_l = '('
-    str_r = ')'
-    b_couple_nested_flag = 1
-    li_tmp, li_match = str_couple_split_verbose_once( li_module_declare, str_l,str_r,b_couple_nested_flag )
-    if( len( li_match )>1 ):  #module声明中， 当出现两次()被匹配上，则第一次()匹配内容是参数列表，第二次()匹配内容是信号列表
-        str_parm = list2str(li_match[0]); #print( str_parm )
-        li_parm_declare.extend( str_parm.split(',') )
-        li_parm_raw.extend( li_parm_declare )
-    ##get li_parm_statement
-    str_l = 'parameter'
-    str_r = ';'
-    b_couple_nested_flag = 0
-    li_tmp, li_match = str_couple_split_verbose_once( li_rem, str_l,str_r,b_couple_nested_flag )
-    if( len( li_match )>=1 ):
-        for li in li_match:
-            li_parm_statement = []
-            str_parm = list2str(li); #print( str_parm )
-            li_parm_statement.extend( str_parm.split(',') )
-            li_parm_raw.extend( li_parm_statement )
-    # print( list2str(li_parm_raw) )
 
-    #step2 parse parm raw----
-    # li_parm = [] #str_param_name, str_default_val, b_independent_flag
-    for s in li_parm_raw:
-        left_val = ''
-        righ_val = ''
-        if( str_find(s,'=') ):
-            li = s.split('=')
-            left_val = li[0].split()[-1].strip()
-            righ_val = li[1].split()[0].strip()
+def signal_decl_type(port: Port) -> str:
+    text = normalize_space(port.type_text)
+    if not text:
+        return "wire"
+    words = text.split()
+    if words[0] in NET_TYPES:
+        return text
+    if words[0] == "reg":
+        return "wire" + text[len("reg") :]
+    if words[0] in {"signed", "unsigned"} or text.startswith("["):
+        return f"wire {text}"
+    if any(token in text for token in ("struct", "union", "enum", "::")):
+        return text
+    if words[0] in DATA_TYPES:
+        return text
+    if words[0] in TYPE_QUALIFIERS and len(words) > 1:
+        return text
+    return text
+
+
+def interface_decl_type(port: Port) -> tuple[str, str]:
+    text = normalize_space(port.type_text)
+    if not text:
+        return "interface", ""
+    first = text.split()[0]
+    if "." in first and "::" not in first:
+        base, modport = first.split(".", 1)
+        return base, modport
+    return text, ""
+
+
+def format_signal_declarations(module: ModuleInfo, tag: str) -> list[str]:
+    lines = ["//signal declare-------------------------------------------------------------"]
+    entries: list[tuple[str, str, str, str]] = []
+    for port in module.ports:
+        if is_passthrough_port(port):
+            continue
+        name = signal_name(tag, port)
+        if port.direction == "if":
+            decl_type, modport = interface_decl_type(port)
+            comment = f" // modport: {modport}" if modport else ""
+            entries.append((decl_type, name, "();", comment))
         else:
-            left_val = s.split()[-1]
-            righ_val = '<must_be_specifed>'
-        b_independent_flag = 1
-        for li in li_parm:
-            key = li[0]
-            if( str_find( righ_val, key ) ):
-                b_independent_flag = 0
-                break
-        li_parm.append( [left_val,righ_val,b_independent_flag] )
-        # print( 'left_val:{:20s}, righ_val:{:20s}, b_independent_flag:{}'.format( left_val,righ_val,b_independent_flag ) )
-    # print( li_parm )
-
-    return li_parm  #[(str_param_name, str_default_val, b_independent_flag), ...]
-def get_port_list( li_str_module ):  #[port_name, bit_width, io]
-    '''
-    * pat1:
-    >>>
-    module A (
-    input A,
-    input wire [31:0] B,
-    output C
-    );
-    >>>
-    * pat2:
-    >>>
-    module A #( parameter DW=32 )(
-    A,B,
-    C
-    );
-    >>>
-    * return: list_port = [port_name, bit_width_declare, io]  #bit_width_declare = [msb:lsb] [msb:lsb]
-    '''
-    li_port = [] #[(str_port_name, str_bit_width_declre, io_type), ...]     #io_type = [i,o,io,if,??]  #i=input, o=ouput, io=inout, if=interface, ??=unknown
-    li_str_module1 = del_all_cmt( li_str_module );  #print( list2str(li_str_module1) )
-
-    str_l = 'module'
-    str_r = ';'
-    b_couple_nested_flag = 0
-    li_tmp = str_couple_split( li_str_module1, str_l,str_r,b_couple_nested_flag )
-    li_rem = li_tmp[2]
-    li_module_declare = li_tmp[1]; #print( list2str(li_module_declare) )
-
-    #step1 get param list----
-    li_port_declare   = [] #  module #( parm_decalre_list ) inst_module ( port_declare_list );
-    li_port_statement = [] #  outside module declare,  input ??;
-
-    ##get li_parm_declare
-    str_port = ''
-    str_l = '('
-    str_r = ')'
-    b_couple_nested_flag = 1
-    li_tmp, li_match = str_couple_split_verbose_once( li_module_declare, str_l,str_r,b_couple_nested_flag )
-    if( len( li_match )>1 ):  #module声明中， 当出现两次()被匹配上，则第一次()匹配内容是参数列表，第二次()匹配内容是信号列表
-        str_port = list2str(li_match[1])
-    else:
-        str_port = list2str(li_match[0])
-    assert( len(li_match)<=2 )   #module的'参数列表'和'信号列表' 最多被()匹配两次
-    li_port_declare.extend( str_port.split(',') ); #print( str_port )
-    ##get li_port_statement
-    b_port_outside_portlist_flag = 0
-    s1 = str_port.split(',')[0] #取端口列表中， 声明第一个信号；  若是input xx,output xx则不用后续再解析；  若是xx,xx， 则需解析端口列表之外的信号定义(input xx; output xx;)；
-    if( len(s1.split())==1 ):
-        b_port_outside_portlist_flag = 1
-    if( b_port_outside_portlist_flag ):
-        #找出所有端口列表之外的信号定义(可能匹配到冗余信息)， ['input xx', 'output xx']
-        print('NOTICE(), the port define outside port_list declare')
-        li_io_type = ['input', 'output', 'inout']
-        for io_type in li_io_type:
-            str_l = io_type
-            str_r = ';'
-            b_couple_nested_flag = 0
-            li_tmp, li_match = str_couple_split_verbose_once( li_rem, str_l,str_r,b_couple_nested_flag )
-            if( len( li_match )>=1 ):
-                for li in li_match:
-                    str_port = list2str(li); #print( str_port )
-                    li_port_statement.append( str_l+' '+str_port )
-                # print( list2str(li_port_statement) )
-        #把端口定义的 '信号方向'+'位宽声明' 解析
-        for p in li_port_declare:
-            str_port_name = p.split()[-1]
-            str_port_name = deal_port_name( str_port_name )
-            assert( len(p.split())==1 )
-            str_p_def = ''
-            for p_def in li_port_statement:
-                if( str_find(p_def, str_port_name) ):
-                    str_p_def = p_def
-                    break
-            str_io_direction, str_bit_width = parse_port_def( str_p_def )
-            li_port.append( [str_port_name,str_io_direction,str_bit_width] )
-            # print( 'parse port define,  port_name:{:20s}, io:{:20s}, bit_width:{}'.format( str_port_name,str_io_direction,str_bit_width ) )
-    else:  #b_port_outside_portlist_flag=0
-        for p in li_port_declare:
-            str_port_name = p.split()[-1]
-            str_port_name = deal_port_name( str_port_name )
-            str_io_direction, str_bit_width = parse_port_def( p )
-            li_port.append( [str_port_name,str_io_direction,str_bit_width] )
-            # print( 'parse port list  ,  port_name:{:20s}, io:{:20s}, bit_width:{}'.format( str_port_name,str_io_direction,str_bit_width ) )
-
-    # for p in li_port:
-    #     print( 'port_name:{:20s}, io:{:20s}, bit_width:{}'.format( p[0],p[1],p[2] ) )
-    return li_port  #[(str_port_name, str_io_direction, str_bit_width), ...]
+            unpacked = f" {port.unpacked}" if port.unpacked else ""
+            entries.append((signal_decl_type(port), name, f"{unpacked};", ""))
+    if entries:
+        type_width = max(len(decl_type) for decl_type, _, _, _ in entries)
+        name_width = max(len(name) for _, name, _, _ in entries)
+        for decl_type, name, suffix, comment in entries:
+            lines.append(f"{decl_type:<{type_width}} {name:<{name_width}}{suffix}{comment}")
+    return lines
 
 
-#get rtl inst----------------------------------------------------------------------
-def get_rtl_inst_str(str_module_name, li_parm, li_port):
-    str_wr = ''
-    #port wire decalre-------
-    li_port_nrm  = []
-    li_port_intf = []
-    for li in li_port:
-        io_type = li[1]
-        if( io_type=='if' ):
-            li_port_intf.append( li )
-        else:
-            li_port_nrm.append( li )
-    for i in range(len(li_port_nrm)):
-        li = li_port_nrm[i]
-        port_name = li[0]
-        io_type = li[1]
-        str_bit_width = li[2]
-        str_wr += 'wire {:30s}{:20s};\n'.format( str_bit_width, port_name )
-    for i in range(len(li_port_intf)):
-        li = li_port_intf[i]
-        port_name = li[0]
-        io_type = li[1]
-        str_bit_width = li[2]
-        str_wr += 'interface_t {}{} ();\n'.format( port_name,str_bit_width )
-    str_wr += '\n'*1
-    #module_name + param_list instance-------
-    if( len(li_parm)>0 ):
-        str_wr+= '{mod_name} #(\n'.format( mod_name=str_module_name )
-        li_parm_independent = []
-        li_parm_dependent   = []
-        for li in li_parm:
-            b_independent_flag = li[2]
-            if( b_independent_flag ):
-                li_parm_independent.append( li )
-            else:
-                li_parm_dependent.append( li )
-        for i in range(len(li_parm_independent)):
-            b_last_flag = i==len(li_parm_independent)-1
-            li = li_parm_independent[i]
-            parm_name = li[0]
-            str_value = li[1]
-            str_comma = ','
-            if( b_last_flag ):
-                str_comma = ' '
-            str_wr+= '<indent>.{:30s} ( {:30s}){} //{}\n'.format( parm_name, parm_name,str_comma, str_value )
-        str_tmp = ''
-        for i in range(len(li_parm_dependent)):
-            li = li_parm_dependent[i]
-            parm_name = li[0]
-            str_value = li[1]
-            str_tmp+= '<indent>//.{:30s} ( {:30s}){} //{}\n'.format( parm_name, parm_name,',', str_value )
-        # print( str_tmp )
-        str_wr+= str_wr.split('\n')[-1]
-        str_wr+= ')u_{mod_name}(\n'.format( mod_name=str_module_name )
-    else:
-        str_wr+= '{mod_name} u_{mod_name}(\n'.format( mod_name=str_module_name )
+def format_input_assigns(module: ModuleInfo, tag: str) -> list[str]:
+    input_ports = [
+        port for port in module.ports
+        if port.direction == "i" and not is_passthrough_port(port)
+    ]
+    if not input_ports:
+        return []
+    lines = ["", "//input assign---------------------------------------------------------------"]
+    name_width = max(len(signal_name(tag, port)) for port in input_ports)
+    for port in input_ports:
+        lines.append(f"assign {signal_name(tag, port):<{name_width}} = {port.name};")
+    return lines
 
-    #port_list inst
-    for i in range(len(li_port)):
-        b_last_flag = i==len(li_port)-1
-        str_comma = ','
-        if( b_last_flag ):
-            str_comma = ' '
-        li = li_port[i]
-        port_name = li[0]
-        io_type = li[1]
-        str_bit_width = li[2]
-        str_wr += '<indent>.{:20s}( {:20s} ){} //{}\n'.format( port_name, port_name, str_comma, io_type )
-    str_wr += ');'
 
-    str_pat = '<indent>'
-    str_rep = ' '*4
-    str_wr  = re.sub(str_pat, str_rep, str_wr, count=0, flags=0); #print( str_wr )
+def format_parameter_instance(module: ModuleInfo, inst_name: str) -> list[str]:
+    if not module.parameters:
+        return [f"{module.name} {inst_name}"]
+    name_width = max(len(param.name) for param in module.parameters)
+    value_width = max(len(param.name) for param in module.parameters)
+    lines = [f"{module.name} #("]
+    for idx, param in enumerate(module.parameters):
+        comma = "," if idx < len(module.parameters) - 1 else " "
+        lines.append(
+            f"    .{param.name:<{name_width}} ({param.name:<{value_width}})"
+            f"{comma} //default: {param.default}"
+        )
+    lines.append(f"){inst_name}")
+    return lines
 
-    return str_wr
-def gen_rtl_inst(fn_rtl,fn_inst):
-    'func: write str_inst to fn_inst file'
 
-    li_module = []
-    if( not os.path.isfile(fn_rtl) ):
-        print( "NOTICE(), no such file or dictionary:{}".format(fn_rtl) )
-        exit(1)
-    fp = open(fn_rtl,'rt')
-    for s in fp.readlines():
-        li_module.append( s.strip('\n\r') )
-    fp.close()
+def format_port_instance(module: ModuleInfo, tag: str) -> list[str]:
+    name_width = max((len(port.name) for port in module.ports), default=1)
+    value_width = max(
+        (len(connection_name(tag, port)) for port in module.ports),
+        default=1,
+    )
+    lines = ["("]
+    for idx, port in enumerate(module.ports):
+        comma = "," if idx < len(module.ports) - 1 else " "
+        lines.append(
+            f"    .{port.name:<{name_width}} ({connection_name(tag, port):<{value_width}})"
+            f"{comma} //{port.direction}"
+        )
+    lines.append(");")
+    return lines
 
-    #step1: get all module...endmodule
-    li_str_module = del_all_cmt( li_module );  #print( list2str(li_str_module) )
-    str_l = 'module'
-    str_r = 'endmodule'
-    b_couple_nested_flag = 0
-    li_tmp, li_match = str_couple_split_verbose_once( li_str_module, str_l,str_r,b_couple_nested_flag )
 
-    #step2: get module_name+parameter_list+port_list + write_to_file
-    fp = open(fn_inst,'wt')
-    for li_mod in li_match:
-        li_module = []
-        li_module.append('module')
-        li_module.extend( li_mod )
-        li_module.append('endmodule'); #print( list2str(li_module) )
-        str_l = 'module'
-        str_r = '('
-        b_couple_nested_flag = 0
-        li_res = str_couple_split( li_module, str_l, str_r, b_couple_nested_flag )
-        str_module_name = list2str(li_res[1]).split()[0].split('#')[0]; #print( str_module_name )
+def format_module_instance(module: ModuleInfo) -> str:
+    tag = "inst"
+    inst_name = f"u_{module.name.lower()}_{tag}"
+    lines: list[str] = [
+        f"// {module.name} integration snippet",
+        *format_signal_declarations(module, tag),
+        *format_input_assigns(module, tag),
+        "",
+        "//instance-------------------------------------------------------------------",
+        *format_parameter_instance(module, inst_name),
+        *format_port_instance(module, tag),
+    ]
+    return "\n".join(lines)
 
-        li_parm = get_parm_list( li_module )
-        li_port = get_port_list( li_module )
-        str_wr = 'inst_begin'+'-'*100
-        str_inst= get_rtl_inst_str( str_module_name, li_parm, li_port )
-        str_wr+= '\n{}\n'.format(str_inst)
-        str_wr+= 'inst_end'+'-'*100
-        str_wr+= '\n'*4
-        fp.write(str_wr)
-    fp.close()
 
-#main function----------------------------------------------------------------------
+def generate_inst(rtl_path: Path, out_path: Path) -> list[ModuleInfo]:
+    text = rtl_path.read_text(encoding="utf-8")
+    modules = parse_modules(text)
+    if not modules:
+        raise ValueError(f"no module found in {rtl_path}")
+    snippets = [
+        f"// Source: {rtl_path}",
+        "",
+        "\n\n".join(format_module_instance(module) for module in modules),
+        "",
+    ]
+    out_path.write_text("\n".join(snippets), encoding="utf-8")
+    return modules
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Generate SystemVerilog integration instance snippet."
+    )
+    parser.add_argument("rtl_abs_path", help="RTL absolute path")
+    parser.add_argument(
+        "-o",
+        "--output",
+        default="inst.sv",
+        help="output snippet file, default: inst.sv",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str]) -> int:
+    args = parse_args(argv)
+    rtl_path = Path(args.rtl_abs_path)
+    if not rtl_path.is_file():
+        print(f"error: RTL file not found: {rtl_path}", file=sys.stderr)
+        return 1
+    out_path = Path(args.output)
+    modules = generate_inst(rtl_path, out_path)
+    names = ", ".join(module.name for module in modules)
+    print(f"generated {out_path} for module(s): {names}")
+    return 0
+
+
 if __name__ == "__main__":
-    fn_rtl = ''
-    if( len(sys.argv)<2 ):
-        print(__doc__)
-    else:
-        fn_rtl = sys.argv[1]
-
-    if( not os.path.isfile(fn_rtl) ):
-        print( 'error! the file %s is not exist\n'%(fn_rtl) )
-        #os.system('pause')
-        exit(-1)
-
-    fn_inst = 'inst.v'
-    gen_rtl_inst(fn_rtl,fn_inst)
-
-    print('generate instance successfully\n')
-    #os.system('pause')
+    raise SystemExit(main(sys.argv[1:]))

@@ -1,75 +1,47 @@
-/******************************************************************************
-*
-*  Authors:   dmg
-*    Email:   dmg@sensetime.com
-*     Date:   2019/11/06-09:56:24
-*
-*  Description:
-*  -
-*
-*  Modify:
-*  -2020/09/21, modify by dmg:
-*   when rd_empty, rd_data=0; to prevent x_state propagate
-*
-******************************************************************************/
+package sample_pkg;
+    typedef struct packed {
+        logic [7:0] data;
+        logic       last;
+    } payload_ts;
+endpackage
 
-`ifndef com_sync_fifo_reg_v
-`define com_sync_fifo_reg_v
-module com_sync_fifo_reg #( parameter
-    DW      = 8,
-    DEPTH   = 4,
-    AW      = $clog2(DEPTH+1)
+interface axi_lite_if;
+    logic valid;
+    logic ready;
+    modport master(output valid, input ready);
+endinterface
+
+module sample_sv #(
+    parameter DW = 32,
+    parameter type PAYLOAD_T = sample_pkg::payload_ts,
+    parameter LANES = 2
 )
 (
-input  wire                     clk                 ,
-input  wire                     rst_n               ,
-input  wire                     clear               ,
-
-input  wire                     wr_en               ,
-input  wire [DW-1:0]            wr_data             ,
-output wire                     wr_full             ,
-input  wire                     rd_en               ,
-output wire [DW-1:0]            rd_data             ,
-output wire                     rd_empty            ,
-output wire [AW-1:0]            water_level         //,
-);
-//localparam-----------------------------------------------------------------
-// localparam AW = $clog2(DEPTH+1);
-//reg  declare---------------------------------------------------------------
-reg  [DEPTH-1:0][DW-1:0] arc_mem;
-//wire declare---------------------------------------------------------------
-wire full;
-wire empty;
-//statement------------------------------------------------------------------
-
-wire [AW-1:0] wr_addr;
-wire [AW-1:0] rd_addr;
-com_sync_fifo_ctrl #(
-    .DEPTH      ( DEPTH      )  //4
-)u_com_sync_fifo_ctrl
-(
-    .clk                  ( clk                  ), //i
-    .rst_n                ( rst_n                ), //i
-    .clear                ( clear                ), //i
-
-    .wr_en                ( wr_en                ), //i
-    .wr_addr              ( wr_addr              ), //o
-    .wr_full              ( wr_full              ), //o
-    .rd_en                ( rd_en                ), //i
-    .rd_addr              ( rd_addr              ), //o
-    .rd_empty             ( rd_empty             ), //o
-    .water_level          ( water_level          )  //o
+    input  wire                         clk,
+    input  wire                         rst_n,
+    input  wire                         core_clk,
+    input  wire                         bus_rst_n,
+    input  logic [LANES-1:0][DW-1:0]    i_rx_data,
+    output sample_pkg::payload_ts       o_tx_payload,
+    output logic [DW-1:0]               tx_data [LANES],
+    axi_lite_if.master                  m_axi
 );
 
-//mem
-always @(posedge clk)
-begin
-    if( wr_en && !wr_full ) begin
-        arc_mem[ wr_addr ] <= wr_data;  //spyglass disable ResetFlop-ML
-    end
-end
-// assign rd_data = rd_empty ? DW'(0) : arc_mem[ rd_addr ];
-assign rd_data = arc_mem[ rd_addr ];
+localparam AW = $clog2(DW);
+localparam HIDDEN = 1;
+parameter EXTRA = AW + 1;
 
-endmodule //end of com_sync_fifo_reg
-`endif //end of com_sync_fifo_reg_v
+endmodule
+
+module sample_v95(clk, rst_n, req, gnt, pad);
+parameter DW = 8;
+localparam SKIP_ME = 4;
+parameter AW = 3;
+
+input clk;
+input rst_n;
+input [DW-1:0] req;
+output [DW-1:0] gnt;
+inout pad;
+
+endmodule
