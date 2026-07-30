@@ -1,0 +1,18 @@
+[hub]
+default_group = "de"
+
+[group.de]
+source = "local"
+path = "hw_tool_de"
+entry = "src/hw_tool_de.py"
+description = "Digital engineering tools."
+
+# External group template. Uncomment and fill in the company repository URL.
+# [group.dv]
+# source = "git"
+# path = "groups/hw_tool_dv"
+# entry = "src/hw_tool_dv.py"
+# description = "Design verification tools."
+# doc_url = "https://company.example/hw_tool_dv/README.md"
+# repository = "ssh://git@company.example/hw_tool_dv.git"
+# branch = "main"
