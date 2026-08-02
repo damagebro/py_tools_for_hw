@@ -58,6 +58,12 @@ python src/autogen_reg.py -i input/leaf_a1_reg.md -o out
 python src/autogen_reg.py -i input/top_reg.md --nested -o out
 ```
 
+该命令也是已登记的最小 smoke 样例；回归测试可执行：
+
+```bash
+python -B test_parser.py
+```
+
 ### 2.3 输入格式转换
 
 将 `input/*.md` 转换为 Excel：

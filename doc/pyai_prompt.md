@@ -52,3 +52,12 @@
 - bbox, 挖空后，所有output tie0;
 - stub, 纯粹挖空, input/output都悬空;
 - port_direction_invert,  挖空后，所有input端口换成output,  所有output换成input;  如果信号名是[i_|o_]风格， 把i_->o_, o_->i_;
+
+# 考虑如何发布
+
+以下问题都先逐一回答, 暂时不生成
+
+- gen_rtl_inst, 如何在rtl代码编辑的现场，调用并例化其他module;
+- 做成vscode plugin的方法, 演示如何使用;
+- 做成linux下面， module load的方法;
+- 做一个py_tool搜集器, 其他工具都通过py_tool调用;

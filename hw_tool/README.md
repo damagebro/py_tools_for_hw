@@ -1,5 +1,77 @@
 # hw_tool
 
+## 联邦 Hub
+
+`hw_tool` 是可独立运行的 hub，也可以作为另一个 `hw_tool` 的 group 被注册。父 hub 不复制或二次维护子 hub 的业务工具；它只调用子 hub 的 `list --recursive --json`，取得带路由的工具清单后完成展示与命令转发。
+
+每个可集成 hub 需要保持以下稳定接口：`list --recursive --json`、`run <qualified_tool>`、`help`、`doc`、`sync`、`doctor`、`verify`、`test` 和 `--version`。递归清单使用 schema version `1`，每个工具包含 `name`、`qualified_name`、`route`、`status`、`description`、`doc_url` 字段。
+
+```bash
+hw_tool list --recursive
+hw_tool list --recursive --json
+hw_tool run de.csr_tool -i register.md --nested -o out
+hw_tool de.csr_tool -i register.md --nested -o out
+hw_tool help de.csr_tool
+hw_tool doc de.csr_tool
+```
+
+`qualified_name` 以 group 路径连接，例如 `de.csr_tool`，更深层的集成可形成 `soc.de.csr_tool`。未冲突的短名仍可直接调用；出现重名时请使用限定名。父 hub 在启动子 hub 时传递访问链，若发现 `A -> B -> A` 形式的循环集成会立即报错，避免递归发现或同步无限循环。
+
+外部仓库把本仓库的 `hw_tool` 作为 group 注册时，入口应指向 `src/hw_tool.py`，并由自身的 `groups.toml` 定义本地 checkout 路径：
+
+```toml
+[group.de_tools]
+source = "git"
+path = "groups/py_tools_for_hw/hw_tool"
+entry = "src/hw_tool.py"
+description = "Hardware development tool federation."
+repository = "https://github.com/damagebro/py_tools_for_hw.git"
+branch = "main"
+```
+
+随后执行 `hw_tool sync de_tools` 拉取该 hub；`hw_tool sync --all` 会继续请求所有已就绪子 hub 同步自己的依赖。`--shallow` 可用于首次浅克隆。
+
+## 工具注册契约
+
+业务工具可以使用任意语言和内部目录结构；注册到 group 时，只需要提供一个可执行入口、帮助和稳定返回码。成功返回 `0`，参数或用法错误返回 `2`，业务执行失败返回 `1`。`--version` 是可选能力；未实现时不影响注册或验证。
+
+下面以 `example_tool` 为例：
+
+```python
+import argparse
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Generate example output.")
+    parser.add_argument("--output", required=True)
+    args = parser.parse_args()
+    print(f"write: {args.output}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+```
+
+```python
+ToolSpec(
+    name="example_tool",
+    script="example_tool/src/main.py",
+    description="Generate example output.",
+    usage="hw_tool de example_tool --output <path>",
+    readme="example_tool/README.md",
+    doc_url="https://git.example.com/de/example_tool/README.md",
+    repository_name="de_tools",
+    example="example_tool/test/input.txt",
+    smoke_args=("--input", "{example}", "--output", "{output}/result.txt"),
+    smoke_outputs=("result.txt",),
+    unit_tests=("example_tool/test/test_main.py",),
+    unit_cwd="example_tool",
+)
+```
+
+业务工具应保持目录内独立运行，不依赖仓库根目录的公共 Python 模块。group 如需复用代码，可在自己的仓库或工具目录内维护。
+
 `hw_tool` 是公司级工具 hub。它只负责发现和转发各小组的 `hw_tool_<group>`；各小组独立维护自己的注册表、业务工具和测试。
 
 当前已注册 `de` 小组。DE 工具按来源仓库统一注册：同属 `py_tools_for_hw` 的工具共享一个 Git URL 和 checkout，`mem_tool` 使用独立的 `com` Git 仓库。
@@ -33,6 +105,8 @@ py_rtl_sim/
 
 ```bash
 python -B src/hw_tool.py list
+python -B src/hw_tool.py --version
+python -B src/hw_tool.py doctor
 python -B src/hw_tool.py help de
 python -B src/hw_tool.py de rtl_inst path/to/child.sv
 ```
@@ -72,15 +146,50 @@ hw_tool de gen_tb -o sim -top dut_top
 
 ## 命令
 
-| 命令                    | 说明                                        |
-| ----------------------- | ------------------------------------------- |
-| `hw_tool list`          | 列出已注册小组 hub 及其可用状态              |
-| `hw_tool list --tools`  | 查询全部已就绪 group，列出全局工具索引       |
-| `hw_tool help <group>`  | 列出指定小组已注册的工具                     |
-| `hw_tool doc <tool>`    | 打印工具当前本地 checkout 中的 README.md     |
-| `hw_tool sync <name>`   | clone 或 fast-forward 更新一个 Git group/tool |
-| `hw_tool sync --all`    | 更新全部已注册的 Git source                  |
-| `hw_tool <group> ...`   | 原样透传参数给指定小组的 `hw_tool_<group>`  |
+| 命令                              | 说明                                              |
+| --------------------------------- | ------------------------------------------------- |
+| `hw_tool --version`               | 显示当前 hub 的 Git tag/commit、提交日期时间与 dirty 状态 |
+| `hw_tool doctor`                  | 检查 Python、Git、PATH、注册项、依赖和子 group 状态 |
+| `hw_tool verify [group|--all]`    | 快速检查各 group 的工具契约与注册完整性          |
+| `hw_tool test --all`              | 发布前汇总执行各 group 的完整回归                |
+| `hw_tool list`                    | 列出已注册小组 hub 及其可用状态                    |
+| `hw_tool list --tools`            | 查询全部已就绪 group，列出全局工具索引             |
+| `hw_tool help <group>`            | 列出指定小组已注册的工具                           |
+| `hw_tool doc <tool>`              | 打印工具当前本地 checkout 中的 README.md           |
+| `hw_tool sync <name> [options]`   | 预览或更新一个 Git group/tool                      |
+| `hw_tool sync --all [options]`    | 预览或更新全部已注册的 Git source                  |
+| `hw_tool <group> ...`             | 原样透传参数给指定小组的 `hw_tool_<group>`        |
+
+`--version` 使用 `git describe --tags --always --dirty` 和最新 commit 日期时间（精确到分钟）；当前没有 tag 时显示 commit ID，有本地修改时追加 `-dirty`。`doctor` 中的 `[warn] launcher` 表示当前终端尚未从更新后的 `PATH` 启动，不影响通过 `python -B src/hw_tool.py` 调用。
+
+## 契约与回归
+
+顶层 `hw_tool` 不重复运行各工具的业务回归。它通过 `verify` 请求每个 group 自检契约；完整单元测试和最小样例生成由各 group 自己维护并执行。
+
+```bash
+hw_tool verify
+hw_tool de verify
+hw_tool de test --unit
+hw_tool de test --smoke csr_tool
+hw_tool de test --all
+hw_tool test --all
+```
+
+`hw_tool test --all` 仅建议在发布前使用；日常提交由各 group 的 CI 执行自己的 `test --all`。
+
+同步前可先预览，不会创建目录，也不会执行 clone、fetch、checkout 或 pull：
+
+```bash
+hw_tool sync --all --dry-run
+hw_tool de sync csr_tool --dry-run
+```
+
+默认首次同步会 clone 指定分支的完整历史。增加 `--shallow` 时，缺失 checkout 会使用 `git clone --depth 1`；已有 checkout 不会被改写或截断：
+
+```bash
+hw_tool sync --all --shallow
+hw_tool de sync mem_tool --shallow
+```
 
 `hw_tool <group> help <tool>` 会显示该工具的参数帮助和已注册的 `document:` URL。例如：
 

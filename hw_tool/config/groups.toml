@@ -1,4 +1,5 @@
 [hub]
+id = "py_tools_for_hw"
 default_group = "de"
 
 [group.de]

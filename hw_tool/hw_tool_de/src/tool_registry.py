@@ -18,6 +18,13 @@ class ToolSpec:
     readme: str | None = None
     checkout: str | None = None
     repository_name: str | None = None
+    doctor_packages: tuple[str, ...] = ()
+    example: str | None = None
+    smoke_args: tuple[str, ...] = ()
+    smoke_outputs: tuple[str, ...] = ()
+    unit_tests: tuple[str, ...] = ()
+    unit_cwd: str | None = None
+    contract_enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -46,6 +53,7 @@ REPOSITORY_SPECS = (
 )
 
 REPOSITORY_MAP = {repository.name: repository for repository in REPOSITORY_SPECS}
+HUB_ID = "py_tools_for_hw.de"
 
 
 TOOL_SPECS = (
@@ -57,6 +65,7 @@ TOOL_SPECS = (
         doc_url="https://github.com/damagebro/com/blob/main/impl_template/memory/mem_tool/README.md",
         readme="impl_template/memory/mem_tool/README.md",
         repository_name="com",
+        contract_enabled=False,
     ),
     ToolSpec(
         name="rtl_inst",
@@ -66,6 +75,11 @@ TOOL_SPECS = (
         doc_url="https://github.com/damagebro/py_tools_for_hw/blob/main/gen_rtl_inst/README.md",
         readme="gen_rtl_inst/README.md",
         repository_name="py_tools_for_hw",
+        example="gen_rtl_inst/test/test.sv",
+        smoke_args=("{example}", "-o", "{output}/inst.sv"),
+        smoke_outputs=("inst.sv",),
+        unit_tests=("gen_rtl_inst/test/test_gen_rtl_inst.py",),
+        unit_cwd="gen_rtl_inst",
     ),
     ToolSpec(
         name="rtl_dummy",
@@ -75,6 +89,11 @@ TOOL_SPECS = (
         doc_url="https://github.com/damagebro/py_tools_for_hw/blob/main/gen_rtl_dummy/README.md",
         readme="gen_rtl_dummy/README.md",
         repository_name="py_tools_for_hw",
+        example="gen_rtl_dummy/test/sample_rtl.sv",
+        smoke_args=("{example}", "-m", "bbox", "-o", "{output}/dummy.sv"),
+        smoke_outputs=("dummy.sv",),
+        unit_tests=("gen_rtl_dummy/test/test_gen_rtl_dummy.py",),
+        unit_cwd="gen_rtl_dummy",
     ),
     ToolSpec(
         name="csr_tool",
@@ -84,6 +103,16 @@ TOOL_SPECS = (
         doc_url="https://github.com/damagebro/py_tools_for_hw/blob/main/csr_tool/README.md",
         readme="csr_tool/README.md",
         repository_name="py_tools_for_hw",
+        doctor_packages=("jinja2", "openpyxl"),
+        example="csr_tool/input/top_reg.md",
+        smoke_args=("-i", "{example}", "--nested", "-o", "{output}"),
+        smoke_outputs=(
+            "doc/top_tree.md",
+            "rtl/top.sv",
+            "firmware/top_all_reg_addr.h",
+        ),
+        unit_tests=("csr_tool/test_parser.py",),
+        unit_cwd="csr_tool",
     ),
     ToolSpec(
         name="gen_tb",
@@ -93,6 +122,11 @@ TOOL_SPECS = (
         doc_url="https://github.com/damagebro/py_tools_for_hw/blob/main/py_rtl_sim/gen_tb_demo/README.md",
         readme="py_rtl_sim/gen_tb_demo/README.md",
         repository_name="py_tools_for_hw",
+        example="py_rtl_sim/gen_tb_demo/examples/basic/README.md",
+        smoke_args=("-o", "{output}/sim", "-top", "smoke_top"),
+        smoke_outputs=("sim/Makefile", "sim/ENV.sh", "sim/tb/top.sv"),
+        unit_tests=("py_rtl_sim/gen_tb_demo/test/test_gen_tb.py",),
+        unit_cwd="py_rtl_sim/gen_tb_demo",
     ),
 )
 

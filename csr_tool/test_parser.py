@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import shutil
+import uuid
 from pathlib import Path
 
 from src.autogen_reg import run
@@ -10,6 +12,27 @@ from src.reg_parser import CSRParser
 
 
 ROOT = Path(__file__).resolve().parent
+
+
+class WorkspaceTemporaryDirectory:
+    """Use a workspace directory to avoid Windows system-temp ACL issues."""
+
+    def __init__(self) -> None:
+        self.path = ROOT / ".test_work" / uuid.uuid4().hex
+
+    def __enter__(self) -> str:
+        self.path.mkdir(parents=True)
+        return str(self.path)
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        shutil.rmtree(self.path, ignore_errors=True)
+        try:
+            self.path.parent.rmdir()
+        except OSError:
+            pass
+
+
+tempfile.TemporaryDirectory = WorkspaceTemporaryDirectory
 
 
 class ParserTests(unittest.TestCase):

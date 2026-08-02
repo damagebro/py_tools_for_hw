@@ -20,6 +20,13 @@ class ToolSpec:
     readme: str | None = None
     checkout: str | None = None
     repository_name: str | None = None
+    doctor_packages: tuple[str, ...] = ()
+    example: str | None = None
+    smoke_args: tuple[str, ...] = ()
+    smoke_outputs: tuple[str, ...] = ()
+    unit_tests: tuple[str, ...] = ()
+    unit_cwd: str | None = None
+    contract_enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -29,6 +36,12 @@ class RepositorySpec:
     branch: str
     checkout: str
     workspace: str | None = None
+
+
+@dataclass(frozen=True)
+class HubSpec:
+    identifier: str
+    default_group: str | None = None
 
 
 def config_path() -> Path:
@@ -94,19 +107,25 @@ REPOSITORY_SPECS: tuple[RepositorySpec, ...] = ()
 REPOSITORY_MAP: dict[str, RepositorySpec] = {}
 
 
-def load_default_group() -> str | None:
+def load_hub_spec() -> HubSpec:
     try:
         config = tomllib.loads(config_path().read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise RuntimeError(f"failed to load group config: {exc}") from exc
 
     hub = config.get("hub", {})
-    default_group = hub.get("default_group") if isinstance(hub, dict) else None
-    if default_group is None:
-        return None
-    if not isinstance(default_group, str) or default_group not in TOOL_MAP:
+    if not isinstance(hub, dict):
+        raise RuntimeError("hub must be a table")
+    identifier = hub.get("id", "hw_tool")
+    if not isinstance(identifier, str) or not identifier:
+        raise RuntimeError("hub.id must be a non-empty string")
+    default_group = hub.get("default_group")
+    if default_group is not None and (
+        not isinstance(default_group, str) or default_group not in TOOL_MAP
+    ):
         raise RuntimeError("hub.default_group must name a registered group")
-    return default_group
+    return HubSpec(identifier=identifier, default_group=default_group)
 
 
-DEFAULT_GROUP = load_default_group()
+HUB_SPEC = load_hub_spec()
+DEFAULT_GROUP = HUB_SPEC.default_group

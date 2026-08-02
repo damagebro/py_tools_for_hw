@@ -28,6 +28,14 @@ class HwToolDeTest(unittest.TestCase):
         self.assertEqual(TOOL_MAP["rtl_dummy"].repository_name, "py_tools_for_hw")
         self.assertEqual(TOOL_MAP["gen_tb"].repository_name, "py_tools_for_hw")
         self.assertEqual(TOOL_MAP["mem_tool"].repository_name, "com")
+        self.assertEqual(TOOL_MAP["csr_tool"].doctor_packages, ("jinja2", "openpyxl"))
+        self.assertFalse(TOOL_MAP["mem_tool"].contract_enabled)
+        for name in ("rtl_inst", "rtl_dummy", "csr_tool", "gen_tb"):
+            tool = TOOL_MAP[name]
+            self.assertTrue(tool.example)
+            self.assertTrue(tool.smoke_args)
+            self.assertTrue(tool.smoke_outputs)
+            self.assertTrue(tool.unit_tests)
 
     def test_list_runs_from_group_entry(self) -> None:
         completed = subprocess.run(
@@ -44,6 +52,41 @@ class HwToolDeTest(unittest.TestCase):
         self.assertIn("csr_tool", completed.stdout)
         self.assertIn("gen_tb", completed.stdout)
         self.assertNotIn("missing", completed.stdout)
+
+    def test_version_shows_group_repository_commit(self) -> None:
+        completed = subprocess.run(
+            [sys.executable, "-B", "src/hw_tool_de.py", "--version"],
+            cwd=GROUP_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertTrue(completed.stdout.startswith("hw_tool_de: "))
+
+    def test_verify_checks_registered_tool_contracts(self) -> None:
+        completed = subprocess.run(
+            [sys.executable, "-B", "src/hw_tool_de.py", "verify"],
+            cwd=GROUP_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("rtl_inst: contract", completed.stdout)
+        self.assertIn("gen_tb: contract", completed.stdout)
+        self.assertIn("mem_tool: externally maintained", completed.stdout)
+
+    def test_sync_dry_run_is_non_mutating(self) -> None:
+        completed = subprocess.run(
+            [sys.executable, "-B", "src/hw_tool_de.py", "sync", "mem_tool", "--dry-run"],
+            cwd=GROUP_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertRegex(completed.stdout, r"would (clone|update|use)")
 
     def test_help_shows_document_url(self) -> None:
         completed = subprocess.run(
@@ -67,7 +110,10 @@ class HwToolDeTest(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
         payload = json.loads(completed.stdout)
-        self.assertIn("mem_tool", [tool["name"] for tool in payload["tools"]])
+        tools = {tool["name"]: tool for tool in payload["tools"]}
+        self.assertIn("mem_tool", tools)
+        self.assertEqual(tools["mem_tool"]["status"], "ready")
+        self.assertRegex(tools["mem_tool"]["detail"] or "", r"^[0-9a-f]+(?: dirty)?$")
 
     def test_doc_prints_cross_repository_readme(self) -> None:
         completed = subprocess.run(

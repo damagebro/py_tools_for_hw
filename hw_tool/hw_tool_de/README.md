@@ -12,6 +12,26 @@
 | `csr_tool`  | `py_tools_for_hw:csr_tool/src/autogen_reg.py`              | 生成 CSR RTL、文档、TB 和 Firmware    |
 | `gen_tb`    | `py_tools_for_hw:py_rtl_sim/gen_tb_demo/gen_tb.py`         | 生成独立仿真 testbench 目录           |
 
+## 工具契约与回归
+
+除 `mem_tool` 外，DE 工具都要求直接支持 `--help`，并统一使用返回码 `0`（成功）、`1`（业务失败）、`2`（参数错误）。`--version` 为可选能力。注册表登记 README、Git URL、入口脚本、最小样例、smoke 参数、预期输出与单元测试入口。
+
+| tool        | 最小样例                                          | smoke 关键输出                  |
+| ----------- | ------------------------------------------------- | ------------------------------- |
+| `rtl_inst`  | `gen_rtl_inst/test/test.sv`                       | `inst.sv`                       |
+| `rtl_dummy` | `gen_rtl_dummy/test/sample_rtl.sv`                | `dummy.sv`                      |
+| `csr_tool`  | `csr_tool/input/top_reg.md`                       | `doc/top_tree.md`、`rtl/top.sv` |
+| `gen_tb`    | `py_rtl_sim/gen_tb_demo/examples/basic/README.md` | `sim/Makefile`、`sim/tb/top.sv` |
+
+```bash
+hw_tool de verify
+hw_tool de test --unit
+hw_tool de test --smoke rtl_inst
+hw_tool de test --all
+```
+
+`verify` 只检查契约和注册信息；`test --unit` 运行工具单元测试；`test --smoke` 在受控临时目录生成最小输出；`test --all` 执行两者。`mem_tool` 由 `com` 仓库独立维护，本组命令会明确跳过它。
+
 ## 工具来源仓库
 
 `rtl_inst`、`rtl_dummy`、`csr_tool` 和 `gen_tb` 共用 `py_tools_for_hw` Git URL 与一个 checkout；`mem_tool` 使用独立的 `com` Git URL。注册表只记录仓库内相对路径，`sync --all` 会按来源仓库去重，同一仓库只同步一次。
@@ -24,6 +44,8 @@
 
 ```bash
 hw_tool de list
+hw_tool de --version
+hw_tool de doctor
 hw_tool de rtl_dummy path/to/source.sv -m port_swap -o dummy.sv
 ```
 
@@ -34,6 +56,15 @@ hw_tool de sync csr_tool
 ```
 
 它会 clone 到 `hw_tool/groups/py_tools_for_hw/`；`mem_tool` 会 clone 到 `hw_tool/groups/com/`。后续可使用 `hw_tool de sync <tool>` 或 `hw_tool sync --all` 更新。
+
+执行同步前可预览动作：
+
+```bash
+hw_tool de sync --all --dry-run
+hw_tool de sync --all --shallow
+```
+
+`hw_tool de --version` 显示 DE hub 所在 Git 仓库的 tag/commit；`hw_tool de doctor` 检查 Python、Git、PATH、每个工具来源状态，以及已登记工具的可选 Python 依赖。
 
 直接调用：
 

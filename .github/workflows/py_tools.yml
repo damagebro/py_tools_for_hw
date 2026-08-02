@@ -1,0 +1,40 @@
+name: Python Hardware Tools
+
+on:
+  push:
+    paths:
+      - "common/**"
+      - "csr_tool/**"
+      - "gen_rtl_dummy/**"
+      - "gen_rtl_inst/**"
+      - "hw_tool/**"
+      - "py_rtl_sim/**"
+      - ".github/workflows/py_tools.yml"
+  pull_request:
+    paths:
+      - "common/**"
+      - "csr_tool/**"
+      - "gen_rtl_dummy/**"
+      - "gen_rtl_inst/**"
+      - "hw_tool/**"
+      - "py_rtl_sim/**"
+      - ".github/workflows/py_tools.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  de-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install CSR dependencies
+        run: python -m pip install -r csr_tool/requirements.txt
+      - name: Verify tool contracts
+        run: python -B hw_tool/src/hw_tool.py verify
+      - name: Run DE regression
+        run: python -B hw_tool/src/hw_tool.py de test --all
