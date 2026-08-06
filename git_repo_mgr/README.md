@@ -139,7 +139,7 @@ top
 
 ## 管理员策略与发版
 
-日常开发假设所有仓库都使用受保护的 `main`；发版只允许从 `origin/main` 当前提交创建统一 tag。高权限命令通过 GitHub/GitLab 服务端 API 生效，token 不写入仓库文件。
+`policy.branch` 是发版使用的默认受保护分支，默认为 `main`；发版只允许从该分支的 `origin/<branch>` 当前提交创建统一 tag。完成全仓统一切换后，管理员也可显式保护或解除任意分支。高权限命令通过 GitHub/GitLab 服务端 API 生效，token 不写入仓库文件。
 
 top 根目录创建 `git_repo_admin.toml`：
 
@@ -170,22 +170,27 @@ gitlab_allowed_to_unprotect = [{ access_level = 40 }]
 
 `integration-only` 只允许配置中的 release 用户、团队或 app 修改 `main`；GitLab 必须显式给出 `gitlab_allowed_to_push`。`read-only` 则禁止全部直接 push/merge，适合短时冻结。无 token 或 API 权限不足时，管理员命令直接失败。
 
-| command                                                 | 用途                                                        |
-| ------------------------------------------------------- | ----------------------------------------------------------- |
-| `admin policy-status`                                   | 显示各仓库 `main` 的 provider、当前 token 身份与保护状态    |
-| `admin policy-diff`                                     | 比较实际策略与 `baseline_mode`，发现人工策略漂移            |
-| `admin policy-apply [--dry-run]`                        | 应用日常 baseline 策略                                     |
-| `admin lock-main [--mode read-only\|integration-only]` | 保存原始策略后，批量临时锁定 `main`                         |
-| `admin unlock-main <lock_id>`                           | 按保存的原始 API 策略精确恢复                               |
-| `admin release <tag> [--push]`                          | 校验 clean、受保护 main、`HEAD == origin/main`，保存快照并打 tag |
-| `admin release-resume <tag>`                            | 按 release 状态继续未完成 tag/push；main 或 commit 变化时停止 |
-| `admin audit`                                           | 输出本地管理员操作审计记录                                   |
+| command                                                 | 用途                                                                  |
+| ------------------------------------------------------- | --------------------------------------------------------------------- |
+| `admin policy-status`                                   | 显示各仓库默认分支的 provider、当前 token 身份与保护状态              |
+| `admin policy-diff`                                     | 比较默认分支实际策略与 `baseline_mode`，发现人工策略漂移              |
+| `admin policy-apply [--dry-run]`                        | 对默认分支应用日常 baseline 策略                                     |
+| `admin protect <branch> [--mode read-only\|integration-only]` | 先确认全部 `origin/<branch>` 存在，再批量建立指定分支保护       |
+| `admin unprotect <branch>`                              | 先确认全部 `origin/<branch>` 存在，再批量删除指定分支保护             |
+| `admin lock-main [--mode read-only\|integration-only]` | 保存原始策略后，批量临时锁定默认分支                                 |
+| `admin unlock-main <lock_id>`                           | 按保存的原始 API 策略精确恢复                                         |
+| `admin release <tag> [--push]`                          | 校验 clean、受保护默认分支、`HEAD == origin/<branch>`，保存快照并打 tag |
+| `admin release-resume <tag>`                            | 按 release 状态继续未完成 tag/push；默认分支或 commit 变化时停止      |
+| `admin audit`                                           | 输出本地管理员操作审计记录                                             |
 
 示例：
 
 ```bash
 <git_repo_mgr> admin policy-status
 <git_repo_mgr> admin policy-diff
+<git_repo_mgr> switch integration_r1
+<git_repo_mgr> admin protect integration_r1
+<git_repo_mgr> admin unprotect integration_r1
 <git_repo_mgr> admin lock-main --mode read-only
 <git_repo_mgr> admin unlock-main main-20260805T120000Z
 <git_repo_mgr> admin release soc_r1p0 --push

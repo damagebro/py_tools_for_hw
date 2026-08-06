@@ -879,7 +879,12 @@ def admin_context(top_arg: str, config_arg: str | None) -> tuple[Path, AdminConf
     return top, config, admin_targets(top, state)
 
 
-def admin_statuses(config: AdminConfig, targets: list[RepositoryTarget]) -> list[PolicyStatus]:
+def admin_statuses(
+    config: AdminConfig,
+    targets: list[RepositoryTarget],
+    branch: str | None = None,
+) -> list[PolicyStatus]:
+    selected_branch = branch or config.branch
     clients: dict[str, Any] = {}
     statuses: list[PolicyStatus] = []
     for target in targets:
@@ -888,7 +893,7 @@ def admin_statuses(config: AdminConfig, targets: list[RepositoryTarget]) -> list
         if client is None:
             client = provider_client(provider)
             clients[provider.name] = client
-        statuses.append(client.status(target, config.branch))
+        statuses.append(client.status(target, selected_branch))
     return statuses
 
 
@@ -932,6 +937,24 @@ def lock_state_path(top: Path, lock_id: str) -> Path:
     return admin_state_dir(top) / "locks" / f"{lock_id}.json"
 
 
+def validate_protection_branch(top: Path, targets: list[RepositoryTarget], branch: str) -> None:
+    if run_git(["check-ref-format", "--branch", branch], top).returncode != 0:
+        raise RepoMgrError("E_BRANCH", f"invalid branch name: {branch}")
+
+    missing: list[str] = []
+    remote_ref = f"refs/heads/{branch}"
+    for target in targets:
+        path = top / target.checkout
+        if run_git(["ls-remote", "--exit-code", "--heads", "origin", remote_ref], path).returncode != 0:
+            missing.append(f"{target.name}: origin/{branch} not found")
+    if missing:
+        raise RepoMgrError(
+            "E_BRANCH_MISSING",
+            f"branch '{branch}' does not exist in every checkout",
+            tuple(missing),
+        )
+
+
 def apply_policy_mode(
     top: Path,
     config: AdminConfig,
@@ -940,15 +963,17 @@ def apply_policy_mode(
     operation: str,
     state_path: Path | None,
     dry_run: bool,
+    branch: str | None = None,
 ) -> int:
     if mode not in {"read-only", "integration-only"}:
         raise RepoMgrError("E_POLICY", f"unsupported policy mode: {mode}")
-    statuses = admin_statuses(config, targets)
+    selected_branch = branch or config.branch
+    statuses = admin_statuses(config, targets, selected_branch)
     clients = admin_client_map(config)
     state: dict[str, Any] = {
         "operation": operation,
         "timestamp": now_text(),
-        "branch": config.branch,
+        "branch": selected_branch,
         "mode": mode,
         "status": "planned" if dry_run else "in_progress",
         "repositories": [
@@ -969,14 +994,14 @@ def apply_policy_mode(
     for item in state["repositories"]:
         name = str(item["name"])
         if dry_run:
-            print(f"[plan] {name}: {config.branch} -> {mode}")
+            print(f"[plan] {name}: {selected_branch} -> {mode}")
             continue
         client = clients[str(item["provider"])]
-        client.apply_mode(str(item["project"]), config.branch, mode, item["raw_policy"])
+        client.apply_mode(str(item["project"]), selected_branch, mode, item["raw_policy"])
         item["applied"] = True
         if state_path is not None:
             write_json(state_path, state)
-        print(f"[ok] {name}: {config.branch} -> {mode}")
+        print(f"[ok] {name}: {selected_branch} -> {mode}")
     state["status"] = "complete"
     if state_path is not None and not dry_run:
         write_json(state_path, state)
@@ -985,7 +1010,7 @@ def apply_policy_mode(
             top,
             {
                 "operation": operation,
-                "branch": config.branch,
+                "branch": selected_branch,
                 "mode": mode,
                 "state": str(state_path) if state_path else None,
                 "dry_run": dry_run,
@@ -1064,6 +1089,39 @@ def command_admin_policy_apply(top_arg: str, config_arg: str | None, dry_run: bo
         None,
         dry_run,
     )
+
+
+def command_admin_protect(
+    top_arg: str,
+    config_arg: str | None,
+    branch: str,
+    mode: str,
+    dry_run: bool,
+) -> int:
+    top, config, targets = admin_context(top_arg, config_arg)
+    validate_protection_branch(top, targets, branch)
+    return apply_policy_mode(top, config, targets, mode, "protect", None, dry_run, branch)
+
+
+def command_admin_unprotect(
+    top_arg: str,
+    config_arg: str | None,
+    branch: str,
+    dry_run: bool,
+) -> int:
+    top, config, targets = admin_context(top_arg, config_arg)
+    validate_protection_branch(top, targets, branch)
+    statuses = admin_statuses(config, targets, branch)
+    clients = admin_client_map(config)
+    for status in statuses:
+        if dry_run:
+            print(f"[plan] {status.target.name}: remove {branch} protection")
+            continue
+        clients[status.provider.name].restore(status.project, branch, None)
+        print(f"[ok] {status.target.name}: removed {branch} protection")
+    if not dry_run:
+        append_audit(top, {"operation": "unprotect", "branch": branch, "dry_run": dry_run})
+    return 0
 
 
 def release_state_path(top: Path, name: str) -> Path:
@@ -1302,20 +1360,33 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     admin_parser = subparsers.add_parser("admin", help="run provider-backed integration authority commands")
     admin_subparsers = admin_parser.add_subparsers(dest="admin_command", required=True)
 
-    policy_status_parser = admin_subparsers.add_parser("policy-status", help="show main branch protection")
+    policy_status_parser = admin_subparsers.add_parser("policy-status", help="show default branch protection")
     policy_status_parser.add_argument("--top", default=".", help="top Git repository, default: current directory")
     policy_status_parser.add_argument("--config", help="admin TOML configuration path")
 
-    policy_diff_parser = admin_subparsers.add_parser("policy-diff", help="compare main policy with baseline")
+    policy_diff_parser = admin_subparsers.add_parser("policy-diff", help="compare default branch policy with baseline")
     policy_diff_parser.add_argument("--top", default=".", help="top Git repository, default: current directory")
     policy_diff_parser.add_argument("--config", help="admin TOML configuration path")
 
-    policy_apply_parser = admin_subparsers.add_parser("policy-apply", help="apply baseline main policy")
+    policy_apply_parser = admin_subparsers.add_parser("policy-apply", help="apply baseline default branch policy")
     policy_apply_parser.add_argument("--top", default=".", help="top Git repository, default: current directory")
     policy_apply_parser.add_argument("--config", help="admin TOML configuration path")
     policy_apply_parser.add_argument("--dry-run", action="store_true", help="show planned changes only")
 
-    lock_parser = admin_subparsers.add_parser("lock-main", help="temporarily lock main across all repositories")
+    protect_parser = admin_subparsers.add_parser("protect", help="protect one branch across all repositories")
+    protect_parser.add_argument("branch", help="existing remote branch to protect")
+    protect_parser.add_argument("--top", default=".", help="top Git repository, default: current directory")
+    protect_parser.add_argument("--config", help="admin TOML configuration path")
+    protect_parser.add_argument("--mode", choices=("read-only", "integration-only"), default="integration-only")
+    protect_parser.add_argument("--dry-run", action="store_true", help="show planned changes only")
+
+    unprotect_parser = admin_subparsers.add_parser("unprotect", help="remove one branch protection across all repositories")
+    unprotect_parser.add_argument("branch", help="existing remote branch to unprotect")
+    unprotect_parser.add_argument("--top", default=".", help="top Git repository, default: current directory")
+    unprotect_parser.add_argument("--config", help="admin TOML configuration path")
+    unprotect_parser.add_argument("--dry-run", action="store_true", help="show planned changes only")
+
+    lock_parser = admin_subparsers.add_parser("lock-main", help="temporarily lock the default branch across all repositories")
     lock_parser.add_argument("--top", default=".", help="top Git repository, default: current directory")
     lock_parser.add_argument("--config", help="admin TOML configuration path")
     lock_parser.add_argument("--mode", choices=("read-only", "integration-only"), default="read-only")
@@ -1328,7 +1399,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     unlock_parser.add_argument("--config", help="admin TOML configuration path")
     unlock_parser.add_argument("--dry-run", action="store_true", help="show planned changes only")
 
-    release_parser = admin_subparsers.add_parser("release", help="snapshot and tag the protected main integration")
+    release_parser = admin_subparsers.add_parser("release", help="snapshot and tag the protected default branch integration")
     release_parser.add_argument("name", help="release tag name")
     release_parser.add_argument("--top", default=".", help="top Git repository, default: current directory")
     release_parser.add_argument("--config", help="admin TOML configuration path")
@@ -1378,6 +1449,16 @@ def main(argv: list[str] | None = None) -> int:
                 return command_admin_policy_diff(args.top, args.config)
             if args.admin_command == "policy-apply":
                 return command_admin_policy_apply(args.top, args.config, args.dry_run)
+            if args.admin_command == "protect":
+                return command_admin_protect(
+                    args.top,
+                    args.config,
+                    args.branch,
+                    args.mode,
+                    args.dry_run,
+                )
+            if args.admin_command == "unprotect":
+                return command_admin_unprotect(args.top, args.config, args.branch, args.dry_run)
             if args.admin_command == "lock-main":
                 return command_admin_lock_main(args.top, args.config, args.mode, args.lock_id, args.dry_run)
             if args.admin_command == "unlock-main":

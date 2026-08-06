@@ -293,16 +293,30 @@ class GitRepoMgrTest(unittest.TestCase):
             self.assertEqual((code, stderr), (0, ""))
 
             code, stdout, stderr = self.invoke(
+                ["admin", "protect", "main", "--top", str(top)],
+            )
+            self.assertEqual((code, stderr), (0, ""))
+            self.assertIn("top: main -> integration-only", stdout)
+            self.assertEqual(len(FakeProviderClient.applied), 2)
+
+            code, stdout, stderr = self.invoke(
+                ["admin", "unprotect", "main", "--top", str(top)],
+            )
+            self.assertEqual((code, stderr), (0, ""))
+            self.assertIn("top: removed main protection", stdout)
+            self.assertEqual(len(FakeProviderClient.restored), 2)
+
+            code, stdout, stderr = self.invoke(
                 ["admin", "lock-main", "--top", str(top), "--lock-id", "test_lock"],
             )
             self.assertEqual((code, stderr), (0, ""))
             self.assertIn("lock_id: test_lock", stdout)
-            self.assertEqual(len(FakeProviderClient.applied), 2)
+            self.assertEqual(len(FakeProviderClient.applied), 4)
             self.assertTrue((top / ".git_repo" / "admin" / "locks" / "test_lock.json").is_file())
 
             code, _, stderr = self.invoke(["admin", "unlock-main", "test_lock", "--top", str(top)])
             self.assertEqual((code, stderr), (0, ""))
-            self.assertEqual(len(FakeProviderClient.restored), 2)
+            self.assertEqual(len(FakeProviderClient.restored), 4)
 
             code, _, stderr = self.invoke(["admin", "release", "release_r1", "--top", str(top)])
             self.assertEqual((code, stderr), (0, ""))
