@@ -1,0 +1,13 @@
+[core]
+id = "dmg:soc:top"
+filesets = ["prelude", "rtl"]
+
+[fileset.prelude]
+files = ["rtl/soc_pkg.sv"]
+
+[fileset.rtl]
+depend = [
+  "dmg:cpu:subsys",
+  "dmg:npu:subsys",
+]
+files = ["rtl/soc_top.sv"]

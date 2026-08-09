@@ -1,0 +1,7 @@
+[core]
+id = "dmg:cpu:alu_harden"
+filesets = ["rtl"]
+
+[fileset.rtl]
+dir = "alu"
+files = ["alu_harden_top.sv"]

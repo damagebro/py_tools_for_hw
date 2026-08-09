@@ -1,0 +1,25 @@
+[core]
+id = "dmg:cpu:subsys"
+filesets = [
+  "rtl",
+  "alu",
+  "!is_synth ? (lsu)",
+]
+
+[fileset.rtl]
+dir = "."
+files = ["cpu_subsys.sv"]
+
+[fileset.alu]
+dir = "."
+files = [
+  "is_synth ? (alu_harden_stub.sv)",
+]
+depend = [
+  "!is_synth ? (dmg:cpu:alu_harden)",
+]
+
+[fileset.lsu]
+depend = [
+  "dmg:cpu:lsu_harden",
+]

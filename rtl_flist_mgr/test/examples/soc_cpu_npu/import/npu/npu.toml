@@ -1,0 +1,5 @@
+[core]
+id = "dmg:npu:subsys"
+
+[fileset.rtl]
+files = ["npu_subsys.sv"]
