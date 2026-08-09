@@ -1,17 +1,37 @@
 # rtl_flist_mgr
 
-`rtl_flist_mgr` 在已同步的多 Git workspace 中扫描 RTL core TOML 或 legacy FuseSoC `.core`，递归展开有序依赖并生成传统 `.f` filelist。它只负责 filelist：不 clone 仓库、不编译 RTL、不生成 stub、不解析 module。
+## 简介
 
-## 快速使用
+`rtl_flist_mgr` 扫描 workspace 根目录与 flat 布局的 `import/*/` checkout，递归解析 RTL core TOML 或 legacy FuseSoC `.core`，生成传统 `.f` filelist。它只负责 filelist：不 clone 仓库、不编译 RTL、不生成 stub、不解析 module。
+
+`git_repo_mgr` 可选用于将多 Git 仓库平铺同步到 `import/`，但 `rtl_flist_mgr` 不读取 `.git_repo/resolved.toml`，可在手工准备、解压或其他脚本拉取的 workspace 中独立运行。
+
+`core_id` 推荐采用 `vendor:lib:name`，例如 `dmg:cpu:lsu_harden`：`vendor` 表示组织、`lib` 表示子系统或 IP 分类、`name` 表示稳定 component 名。也兼容 FuseSoC 四段 VLNV `vendor:lib:name:version`，例如 `dmg:cpu:lsu_harden:1.0.0`。它是 filelist 依赖标识，不要求与某个 module 名相同；一个 core 可以包含 package、多个 module 或模型文件。
+
+## 设计初衷
+
+本工具充分借鉴并兼容 FuseSoC `.core` 的 core file、稳定 `core_id`、fileset 和递归依赖思路：每个 IP/子系统在自己的仓库维护直接依赖与文件集合，顶层只引用 core ID，从而将 filelist 去中心化。
+
+新项目更推荐 `.toml + legacy.f`：TOML 负责新的 core/fileset/depend 描述，`legacy.f` 保留传统 filelist 内容。SRAM/DW 仿真模型、PDK 绝对路径、历史仿真选项等不适合强行改造成独立 core 的内容，仍可通过 `legacy_f` 按原有 `rtl_filelist.f` 方式接入。新 TOML 与旧 `.f` 可以逐个 fileset 混用，迁移不必一步完成。
+
+## 常用命令
 
 ```bash
-python -B src/rtl_flist_mgr.py rtl/soc.toml -o out/soc_sim.f
-python -B src/rtl_flist_mgr.py rtl/soc.toml -m synth -o out/soc_synth.f
-python -B src/rtl_flist_mgr.py rtl/soc.toml -m lint -o out/soc_lint.f
+# 默认 sim 模式
+python -B src/rtl_flist_mgr.py <core_file> -o <output.f>
+
+# 综合或 lint filelist
+python -B src/rtl_flist_mgr.py <core_file> -m synth -o <output.f>
+python -B src/rtl_flist_mgr.py <core_file> -m lint  -o <output.f>
+
+# 查询当前 workspace 本体 core、显式 workspace 或指定目录 core
 python -B src/rtl_flist_mgr.py --list-core
+python -B src/rtl_flist_mgr.py --list-core -w <workspace>
+python -B src/rtl_flist_mgr.py --list-core -d <directory>
+python -B src/rtl_flist_mgr.py --help
 ```
 
-`sim` 是默认模式。工具直接扫描 workspace 根目录（排除 `import/`）和 `import/*/` 的一级 checkout，并更新 `.rtl_flist/core_index.toml`、`.rtl_flist/core_tree.txt`。`git_repo_mgr` 可选用于将多仓库平铺同步到 `import/`，但不是运行依赖。
+生成 flist 时，`-w <workspace>` 默认当前目录。`--list-core` 未传 `-w` 时会从当前目录向上寻找 workspace root：优先最近含 `.rtl_flist/` 的目录，其次最近含 `import/` 的目录；两者均不存在时，以当前目录为 root。每次 `--list-core` 都先打印 `root_dir: <path> (<source>)`，便于确认本次推断结果。默认查询仅列 root 本体 core，排除 `import/`。
 
 ## Core TOML
 
@@ -47,24 +67,11 @@ depend = ["dmg:cpu:lsu_harden"]
 
 条件写作 `condition ? (value)`，支持 `!`、`&&`、`||`。工具内建互斥 flag：`is_sim`、`is_synth`、`is_lint`。条件可作用于文件、fileset 选择项和 `depend` 中的 core ID 引用。
 
-```toml
-[core]
-filesets = ["rtl", "!is_synth ? (lsu)"]
-
-[fileset.alu]
-files = ["is_synth ? (alu_harden_stub.sv)"]
-depend = ["!is_synth ? (dmg:cpu:alu_harden)"]
-```
-
 | mode    | active flag | typical use |
 | ------- | ----------- | ----------- |
 | `sim`   | `is_sim`    | 展开 RTL、testbench 和仿真模型。 |
 | `synth` | `is_synth`  | 选择用户维护的 stub，或跳过已 harden 的内部 RTL。 |
 | `lint`  | `is_lint`   | 保留待检查 RTL，同时按条件排除 SRAM/DW 仿真模型。 |
-
-## 用户维护 Stub
-
-综合替代实现由用户作为普通 fileset 文件维护。例如原模块为 `abc`、原文件为 `abc.sv` 时，`abc_stub.sv` 或 `abc_bbox.sv` 仍必须只定义 `module abc`，以供后端综合链接原实例。`_stub`/`_bbox` 是文件形态标识，也是 `filename = module_name` 规则的唯一例外。
 
 ## 集中管理 Core TOML
 
@@ -84,25 +91,26 @@ cpu/
     └── model/
 ```
 
-这种组织是新 TOML 相比 legacy `.core` 的实用优势：core 描述可统一审阅、统一生成/检查，RTL 目录不因 filelist 组织被迫调整。
+这让 core 描述可统一审阅、统一生成和统一检查，同时不会迫使 RTL 目录为 filelist 组织让位。
 
-## 路径与 Legacy 兼容
-
-默认 `--path-style absolute`，适合后端、DW/SRAM 等绝对模型目录；也可选择 `relative` 或 `rootvar`。
+## Legacy `.f` 与路径
 
 `legacy_f` 可在 TOML fileset 中封装旧 `.f`，支持普通文件、`-f` / `-F`、`+incdir+`、`+define+`。外部目录由 `--var NAME=VALUE` 显式传入；未支持的 legacy 选项会报错。常见 FuseSoC CAPI2 `.core`、fileset `depend` 与 `targets.default` 也保持兼容。
 
-## 参数
+默认 `--path-style absolute`，适合后端、DW/SRAM 等绝对模型目录；也可选择 `relative` 或 `rootvar`。
 
-| parameter             | description |
-| --------------------- | ----------- |
-| `core_file`           | 顶层 core TOML 或 `.core`；生成 flist 时必填。 |
-| `-o <output.f>`       | 生成的 filelist；生成 flist 时必填。 |
-| `-m <sim|synth|lint>` | 输出模式，默认 `sim`。 |
-| `-w <workspace>`      | workspace 根目录；`import/*/` 自动视为独立 checkout root，默认当前目录。 |
-| `--path-style`        | `absolute`、`relative` 或 `rootvar`，默认 `absolute`。 |
-| `--var NAME=VALUE`    | `legacy_f` 外部路径变量，可重复指定。 |
-| `--list-core`         | 仅列出 `import/` 外的本体 core。 |
+## 完整参数
+
+| parameter               | description |
+| ----------------------- | ----------- |
+| `core_file`             | 顶层 core TOML 或 `.core`；生成 flist 时必填。 |
+| `-o <output.f>`         | 生成的 filelist；生成 flist 时必填。 |
+| `-m <sim|synth|lint>`   | 输出模式，默认 `sim`。 |
+| `-w <workspace>`        | workspace 根目录；`import/*/` 自动视为独立 checkout root。生成 flist 时默认当前目录。 |
+| `--path-style`          | `absolute`、`relative` 或 `rootvar`，默认 `absolute`。 |
+| `--var NAME=VALUE`      | `legacy_f` 外部路径变量，可重复指定。 |
+| `--list-core`           | 列出 workspace 本体 core，排除 `import/`；未传 `-w` 时优先通过 `.rtl_flist/`、其次 `import/` 向上推断 workspace root，并打印 `root_dir`。 |
+| `-d <directory>`        | 与 `--list-core` 配合，递归列出指定目录下的 core；不解析 depend，也不需要 workspace，并打印该目录为 `root_dir`。 |
 
 ## 固定示例与回归
 
@@ -114,6 +122,7 @@ cpu/
 python -B test/test_rtl_flist_mgr.py
 ```
 
-## 文档约定
+## 使用示例
 
-Markdown 表格必须在源码中按列宽补齐空格并对齐 `|`，保证渲染前后的可读性。
+`rtl_flist_mgr\test\examples\soc_cpu_npu\README.md`
+

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import shutil
 import sys
 import unittest
@@ -136,12 +137,69 @@ files = ["rtl/top.sv"]
         self.assertEqual(code, 1)
         self.assertIn("ERROR [E_MANIFEST]: unsupported [core] property: top_module_name", stderr)
 
+    def test_supports_fusesoc_four_part_core_id(self) -> None:
+        self.write("rtl/top.sv")
+        self.write("top.toml", """
+[core]
+id = "dmg:soc:top:1.0.0"
+
+[fileset.rtl]
+files = ["rtl/top.sv"]
+""")
+        output = self.work / "out.f"
+        code, _, stderr = self.invoke(["top.toml", "--workspace", str(self.work), "-o", str(output)])
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertIn((self.work / "rtl/top.sv").as_posix(), output.read_text(encoding="utf-8"))
+
     def test_list_core_excludes_imported_cores(self) -> None:
         self.create_soc_workspace()
         code, stdout, stderr = self.invoke(["--workspace", str(self.work), "--list-core"])
         self.assertEqual((code, stderr), (0, ""))
         self.assertIn("dmg:soc:top", stdout)
         self.assertNotIn("dmg:cpu:subsys", stdout)
+
+    def test_list_core_directory(self) -> None:
+        self.create_soc_workspace()
+        directory = self.work / "import" / "cpu" / "filelist"
+        code, stdout, stderr = self.invoke(["--list-core", "--directory", str(directory)])
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertIn(f"root_dir: {directory.resolve()} (--directory)", stdout)
+        self.assertIn("dmg:cpu:subsys", stdout)
+        self.assertIn("dmg:cpu:alu_harden", stdout)
+        self.assertIn("dmg:cpu:lsu_harden", stdout)
+        self.assertNotIn("dmg:npu:subsys", stdout)
+
+    def test_list_core_finds_workspace_root_from_subdirectory(self) -> None:
+        self.create_soc_workspace()
+        previous = Path.cwd()
+        os.chdir(self.work / "rtl")
+        self.addCleanup(os.chdir, previous)
+        code, stdout, stderr = self.invoke(["--list-core"])
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertIn(f"root_dir: {self.work} (import)", stdout)
+        self.assertIn("dmg:soc:top", stdout)
+        self.assertNotIn("dmg:cpu:subsys", stdout)
+
+    def test_list_core_finds_workspace_root_from_state_directory(self) -> None:
+        self.write(".rtl_flist/.keep")
+        self.write("rtl/top.sv")
+        self.write("top.toml", """
+[core]
+id = "dmg:test:top"
+
+[fileset.rtl]
+files = ["rtl/top.sv"]
+""")
+        nested_directory = self.work / "rtl"
+        previous = Path.cwd()
+        os.chdir(nested_directory)
+        self.addCleanup(os.chdir, previous)
+
+        code, stdout, stderr = self.invoke(["--list-core"])
+
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertIn(f"root_dir: {self.work} (.rtl_flist)", stdout)
+        self.assertIn("dmg:test:top", stdout)
 
 
 if __name__ == "__main__":

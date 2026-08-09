@@ -124,7 +124,21 @@ def load_workspace(workspace_arg: str) -> tuple[Path, tuple[WorkspaceRepository,
     return workspace, tuple(repositories)
 
 
-def iter_descriptors(workspace: Path, repositories: tuple[WorkspaceRepository, ...]) -> list[tuple[Path, Path]]:
+def find_workspace_root(start: Path) -> tuple[Path, str]:
+    current = start.resolve()
+    for candidate in (current, *current.parents):
+        if (candidate / STATE_DIR).is_dir():
+            return candidate, STATE_DIR
+        if (candidate / "import").is_dir():
+            return candidate, "import"
+    return current, "current directory"
+
+
+def iter_descriptors(
+    workspace: Path,
+    repositories: tuple[WorkspaceRepository, ...],
+    skip_workspace_import: bool = True,
+) -> list[tuple[Path, Path]]:
     result: list[tuple[Path, Path]] = []
     seen: set[Path] = set()
     for repository in repositories:
@@ -134,7 +148,7 @@ def iter_descriptors(workspace: Path, repositories: tuple[WorkspaceRepository, .
             relative = path.relative_to(repository.root)
             if any(part in SKIP_DIRS for part in relative.parts):
                 continue
-            if repository.root == workspace and relative.parts and relative.parts[0] == "import":
+            if skip_workspace_import and repository.root == workspace and relative.parts and relative.parts[0] == "import":
                 continue
             resolved = path.resolve()
             if resolved not in seen:
@@ -303,9 +317,13 @@ def parse_capi2_core(path: Path, git_root: Path) -> Core:
     return Core(name, path, git_root, "fusesoc-core", filesets, selected)
 
 
-def scan_cores(workspace: Path, repositories: tuple[WorkspaceRepository, ...]) -> dict[str, Core]:
+def scan_cores(
+    workspace: Path,
+    repositories: tuple[WorkspaceRepository, ...],
+    skip_workspace_import: bool = True,
+) -> dict[str, Core]:
     cores: dict[str, Core] = {}
-    for descriptor, git_root in iter_descriptors(workspace, repositories):
+    for descriptor, git_root in iter_descriptors(workspace, repositories, skip_workspace_import):
         core = parse_toml_core(descriptor, git_root) if descriptor.suffix == ".toml" else parse_capi2_core(descriptor, git_root)
         if core is None:
             continue
@@ -591,7 +609,8 @@ def core_from_file(core_file: str, workspace: Path, cores: dict[str, Core]) -> C
 
 
 def command_generate(args: argparse.Namespace) -> int:
-    workspace, cores, resolver = build_resolver(args.workspace, args.mode, parse_variables(args.variables))
+    workspace_arg = args.workspace or "."
+    workspace, cores, resolver = build_resolver(workspace_arg, args.mode, parse_variables(args.variables))
     core = core_from_file(args.core_file, workspace, cores)
     output = Path(args.output).resolve()
     lines = resolver.resolve(core.core_id)
@@ -603,30 +622,52 @@ def command_generate(args: argparse.Namespace) -> int:
 
 
 def command_list_core(args: argparse.Namespace) -> int:
-    workspace, repositories = load_workspace(args.workspace)
-    local_cores = scan_cores(workspace, (repositories[0],))
-    for core_id in sorted(local_cores):
-        core = local_cores[core_id]
-        print(f"{core_id:<40}  {core.manifest.relative_to(workspace).as_posix()}")
+    if args.directory:
+        directory = Path(args.directory).resolve()
+        if not directory.is_dir():
+            raise FlistError("E_DIRECTORY", f"core directory not found: {directory}")
+        repositories = (WorkspaceRepository("query", directory, "."),)
+        cores = scan_cores(directory, repositories, skip_workspace_import=False)
+        display_root = directory
+        root_source = "--directory"
+    else:
+        if args.workspace:
+            workspace_arg = args.workspace
+            root_source = "--workspace"
+        else:
+            workspace, root_source = find_workspace_root(Path.cwd())
+            workspace_arg = str(workspace)
+        workspace, repositories = load_workspace(workspace_arg)
+        cores = scan_cores(workspace, (repositories[0],))
+        display_root = workspace
+    print(f"root_dir: {display_root} ({root_source})")
+    for core_id in sorted(cores):
+        core = cores[core_id]
+        print(f"{core_id:<40}  {core.manifest.relative_to(display_root).as_posix()}")
     return 0
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate a deterministic RTL filelist from one core file.")
-    parser.add_argument("--version", action="version", version="rtl_flist_mgr 0.4.0")
+    parser.add_argument("--version", action="version", version="rtl_flist_mgr 0.7.0")
     parser.add_argument("core_file", nargs="?", help="top core TOML or legacy .core file")
-    parser.add_argument("-w", "--workspace", default=".", help="workspace root; import/* directories are scanned as checkout roots")
+    parser.add_argument("-w", "--workspace", help="workspace root; import/* directories are scanned as checkout roots")
     parser.add_argument("-m", "--mode", choices=("sim", "synth", "lint"), default="sim", help="output mode, default: sim")
     parser.add_argument("--var", dest="variables", action="append", default=[], help="legacy path variable NAME=VALUE")
     parser.add_argument("-o", "--output", help="generated filelist path")
     parser.add_argument("--path-style", choices=("relative", "absolute", "rootvar"), default="absolute")
-    parser.add_argument("--list-core", action="store_true", help="list core IDs outside workspace import/")
+    parser.add_argument("-d", "--directory", help="directory for --list-core; recursively list core IDs below it")
+    parser.add_argument("--list-core", action="store_true", help="list workspace core IDs outside import/")
     args = parser.parse_args(argv)
     if args.list_core:
         if args.core_file is not None or args.output is not None:
             parser.error("--list-core does not accept core_file or --output")
+        if args.directory is not None and args.workspace is not None:
+            parser.error("--directory and --workspace cannot be used together with --list-core")
     elif args.core_file is None or args.output is None:
         parser.error("core_file and --output are required unless --list-core is used")
+    elif args.directory is not None:
+        parser.error("--directory requires --list-core")
     return args
 
 
