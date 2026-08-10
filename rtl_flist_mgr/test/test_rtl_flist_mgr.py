@@ -198,6 +198,54 @@ files = ["rtl/top.sv"]
         self.assertEqual((code, stderr), (0, ""))
         self.assertIn((self.work / "rtl/top.sv").as_posix(), output.read_text(encoding="utf-8"))
 
+    def test_places_first_files_and_filesets_before_dependencies(self) -> None:
+        normal_file = self.write("rtl/normal.sv")
+        first_file = self.write("rtl/first.sv")
+        prelude_file = self.write("rtl/prelude.sv")
+        leaf_file = self.write("import/cpu/leaf.sv")
+        self.write("top.toml", """
+[core]
+id = "dmg:test:top"
+filesets = ["rtl", "first: prelude"]
+
+[fileset.rtl]
+files = ["rtl/normal.sv", "first: rtl/first.sv"]
+
+[fileset.prelude]
+depend = ["dmg:test:leaf"]
+files = ["rtl/prelude.sv"]
+""")
+        self.write("import/cpu/leaf.toml", """
+[core]
+id = "dmg:test:leaf"
+
+[fileset.rtl]
+files = ["leaf.sv"]
+""")
+        output = self.work / "out.f"
+
+        code, _, stderr = self.invoke(["top.toml", "--workspace", str(self.work), "-o", str(output)])
+
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(
+            output.read_text(encoding="utf-8").splitlines(),
+            [first_file.as_posix(), prelude_file.as_posix(), normal_file.as_posix(), leaf_file.as_posix()],
+        )
+
+    def test_rejects_first_marker_in_depend(self) -> None:
+        self.write("top.toml", """
+[core]
+id = "dmg:test:top"
+
+[fileset.rtl]
+depend = ["first: dmg:test:leaf"]
+""")
+
+        code, _, stderr = self.invoke(["top.toml", "--workspace", str(self.work), "-o", str(self.work / "out.f")])
+
+        self.assertEqual(code, 1)
+        self.assertIn("ERROR [E_MANIFEST]: first: is not supported in fileset.rtl.depend", stderr)
+
     def test_preserves_legacy_v_library_file(self) -> None:
         library_file = self.write("rtl/legacy_cell.v", "module legacy_cell; endmodule\n")
         self.write("legacy.f", "-v rtl/legacy_cell.v\n")

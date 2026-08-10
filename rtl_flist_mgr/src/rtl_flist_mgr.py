@@ -17,6 +17,7 @@ STATE_DIR = ".rtl_flist"
 SKIP_DIRS = {".git", ".rtl_flist", "__pycache__", "build", "out"}
 VARIABLE_RE = re.compile(r"\$(?:\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)\}|(?P<plain>[A-Za-z_][A-Za-z0-9_]*))")
 CONDITION_RE = re.compile(r"^(?P<condition>.+?)\s*\?\s*\((?P<value>.*)\)$")
+FIRST_PREFIX = "first: "
 
 
 class FlistError(Exception):
@@ -108,6 +109,22 @@ def validate_keys(table: dict[str, Any], allowed: set[str], scope: str, path: Pa
         raise FlistError("E_MANIFEST", f"unsupported {scope} property: {unsupported[0]} ({path})")
 
 
+def has_first_marker(value: str) -> bool:
+    if value.startswith(FIRST_PREFIX):
+        return True
+    match = CONDITION_RE.match(value)
+    return match is not None and match.group("value").strip().startswith(FIRST_PREFIX)
+
+
+def split_first_marker(value: str, source: Path) -> tuple[str, bool]:
+    if not value.startswith(FIRST_PREFIX):
+        return value, False
+    result = value[len(FIRST_PREFIX):].strip()
+    if not result:
+        raise FlistError("E_FIRST", f"first: requires a file or fileset value: {source}")
+    return result, True
+
+
 def load_workspace(workspace_arg: str) -> tuple[Path, tuple[WorkspaceRepository, ...]]:
     workspace = Path(workspace_arg).resolve()
     if not workspace.is_dir():
@@ -191,6 +208,10 @@ def parse_toml_core(path: Path, git_root: Path) -> Core | None:
         files = string_tuple(raw.get("files", []), f"fileset.{name}.files", path)
         legacy_f = string_optional(raw.get("legacy_f"), f"fileset.{name}.legacy_f", path)
         depend = string_tuple(raw.get("depend", []), f"fileset.{name}.depend", path)
+        if any(has_first_marker(value) for value in depend):
+            raise FlistError("E_MANIFEST", f"first: is not supported in fileset.{name}.depend: {path}")
+        if legacy_f is not None and has_first_marker(legacy_f):
+            raise FlistError("E_MANIFEST", f"first: is not supported in fileset.{name}.legacy_f: {path}")
         if not files and legacy_f is None and not depend:
             raise FlistError("E_MANIFEST", f"fileset '{name}' has no files, depend, or legacy_f: {path}")
         filesets[name] = FileSet(
@@ -492,16 +513,17 @@ class Resolver:
         self.active_flags = frozenset({"is_sim" if mode == "sim" else f"is_{mode}"})
         self.variables = variables
         self.cached_index = cached_index
+        self.first_lines: list[OutputLine] = []
         self.lines: list[OutputLine] = []
-        self.emitted_files: set[Path] = set()
-        self.emitted_options: set[tuple[str, str]] = set()
+        self.emitted_files: dict[Path, tuple[OutputLine, bool]] = {}
+        self.emitted_options: dict[tuple[str, str], tuple[OutputLine, bool]] = {}
         self.visited: set[str] = set()
         self.active: list[str] = []
         self.tree_edges: list[tuple[str, str]] = []
 
     def resolve(self, top_core: str) -> tuple[OutputLine, ...]:
         self.resolve_core(top_core)
-        return tuple(self.lines)
+        return tuple((*self.first_lines, *self.lines))
 
     def resolve_core(self, core_id: str) -> None:
         if core_id in self.active:
@@ -518,11 +540,12 @@ class Resolver:
         for fileset_value in core.selected_filesets:
             fileset_name = condition_value(fileset_value, self.active_flags, core.manifest)
             if fileset_name is not None:
-                self.resolve_fileset(core, fileset_name)
+                fileset_name, first_fileset = split_first_marker(fileset_name, core.manifest)
+                self.resolve_fileset(core, fileset_name, first_fileset)
         self.active.pop()
         self.visited.add(core_id)
 
-    def resolve_fileset(self, core: Core, fileset_name: str) -> None:
+    def resolve_fileset(self, core: Core, fileset_name: str, first_fileset: bool) -> None:
         fileset = core.filesets.get(fileset_name)
         if fileset is None:
             raise FlistError("E_FILESET", f"core '{core.core_id}' has no fileset '{fileset_name}'")
@@ -533,20 +556,32 @@ class Resolver:
         for file_name in fileset.files:
             selected = condition_value(file_name, self.active_flags, core.manifest)
             if selected is not None:
-                self.emit_file(resolve_local_path(selected, base, core.git_root, self.variables, core.manifest), core)
+                selected, first_file = split_first_marker(selected, core.manifest)
+                self.emit_file(
+                    resolve_local_path(selected, base, core.git_root, self.variables, core.manifest),
+                    core,
+                    first_fileset or first_file,
+                )
         if fileset.legacy_f is not None:
             selected = condition_value(fileset.legacy_f, self.active_flags, core.manifest)
             if selected is not None:
-                self.resolve_legacy_f(resolve_legacy_path(selected, base, self.variables, core.manifest), core, ())
+                self.resolve_legacy_f(
+                    resolve_legacy_path(selected, base, self.variables, core.manifest),
+                    core,
+                    (),
+                    first_fileset,
+                )
 
     def resolve_dependency(self, parent: Core, dependency_value: str) -> None:
         dependency_id = condition_value(dependency_value, self.active_flags, parent.manifest)
         if dependency_id is None:
             return
+        if has_first_marker(dependency_id):
+            raise FlistError("E_FIRST", f"first: is not supported in depend: {parent.manifest}")
         self.tree_edges.append((parent.core_id, dependency_id))
         self.resolve_core(dependency_id)
 
-    def resolve_legacy_f(self, path: Path, core: Core, stack: tuple[Path, ...]) -> None:
+    def resolve_legacy_f(self, path: Path, core: Core, stack: tuple[Path, ...], first_output: bool) -> None:
         if path in stack:
             raise FlistError("E_LEGACY_CYCLE", f"legacy_f include cycle: {path}")
         try:
@@ -560,47 +595,67 @@ class Resolver:
             if line.startswith("+incdir+"):
                 for item in line[len("+incdir+"):].split("+"):
                     if item:
-                        self.emit_option("incdir", str(resolve_legacy_path(item, path.parent, self.variables, path)), core)
+                        self.emit_option("incdir", str(resolve_legacy_path(item, path.parent, self.variables, path)), core, first_output)
                 continue
             if line.startswith("+define+"):
                 for item in line[len("+define+"):].split("+"):
                     if item:
-                        self.emit_option("define", item, core)
+                        self.emit_option("define", item, core, first_output)
                 continue
             if line.startswith(("-f ", "-F ")):
-                self.resolve_legacy_f(resolve_legacy_path(line[3:].strip(), path.parent, self.variables, path), core, (*stack, path))
+                self.resolve_legacy_f(
+                    resolve_legacy_path(line[3:].strip(), path.parent, self.variables, path),
+                    core,
+                    (*stack, path),
+                    first_output,
+                )
                 continue
             if line == "-v" or line.startswith(("-v ", "-v\t")):
                 library_file = line[2:].strip()
                 if not library_file:
                     raise FlistError("E_LEGACY_F", f"-v requires one Verilog file in {path}")
-                self.emit_library_file(resolve_legacy_path(library_file, path.parent, self.variables, path), core)
+                self.emit_library_file(resolve_legacy_path(library_file, path.parent, self.variables, path), core, first_output)
                 continue
             if line.startswith(("-y", "+libext+", "-work", "-L ")):
                 raise FlistError("E_LEGACY_F", f"unsupported legacy_f option in {path}: {line}")
-            self.emit_file(resolve_legacy_path(line, path.parent, self.variables, path), core)
+            self.emit_file(resolve_legacy_path(line, path.parent, self.variables, path), core, first_output)
 
-    def emit_option(self, kind: str, value: str, core: Core) -> None:
+    def emit_option(self, kind: str, value: str, core: Core, first_output: bool) -> None:
         key = (kind, value)
-        if key not in self.emitted_options:
-            self.emitted_options.add(key)
-            self.lines.append(OutputLine(kind, value, core.git_root, core.core_id, core.manifest))
+        previous = self.emitted_options.get(key)
+        if previous is not None:
+            line, previous_first = previous
+            if first_output and not previous_first:
+                self.lines.remove(line)
+                self.first_lines.append(line)
+                self.emitted_options[key] = (line, True)
+            return
+        line = OutputLine(kind, value, core.git_root, core.core_id, core.manifest)
+        self.emitted_options[key] = (line, first_output)
+        (self.first_lines if first_output else self.lines).append(line)
 
-    def emit_file(self, path: Path, core: Core) -> None:
+    def emit_file(self, path: Path, core: Core, first_output: bool) -> None:
         if not path.is_file():
             raise FlistError("E_FILE_MISSING", f"RTL file not found: {path}", (f"core: {core.core_id}",))
-        self._emit_file(path, core.git_root, core.core_id, core.manifest)
+        self._emit_file(path, core.git_root, core.core_id, core.manifest, first_output)
 
-    def emit_library_file(self, path: Path, core: Core) -> None:
+    def emit_library_file(self, path: Path, core: Core, first_output: bool) -> None:
         if not path.is_file():
             raise FlistError("E_FILE_MISSING", f"Verilog library file not found: {path}", (f"core: {core.core_id}",))
-        self.emit_option("vfile", str(path), core)
+        self.emit_option("vfile", str(path), core, first_output)
 
-    def _emit_file(self, path: Path, root: Path | None, core_id: str, manifest: Path) -> None:
-        if path in self.emitted_files:
+    def _emit_file(self, path: Path, root: Path | None, core_id: str, manifest: Path, first_output: bool) -> None:
+        previous = self.emitted_files.get(path)
+        if previous is not None:
+            line, previous_first = previous
+            if first_output and not previous_first:
+                self.lines.remove(line)
+                self.first_lines.append(line)
+                self.emitted_files[path] = (line, True)
             return
-        self.emitted_files.add(path)
-        self.lines.append(OutputLine("file", str(path), root, core_id, manifest))
+        line = OutputLine("file", str(path), root, core_id, manifest)
+        self.emitted_files[path] = (line, first_output)
+        (self.first_lines if first_output else self.lines).append(line)
 
     def tree_text(self, top_core: str) -> str:
         children: dict[str, list[str]] = {}
@@ -742,7 +797,7 @@ def command_list_core(args: argparse.Namespace) -> int:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate a deterministic RTL filelist from one core file.")
-    parser.add_argument("--version", action="version", version="rtl_flist_mgr 0.8.0")
+    parser.add_argument("--version", action="version", version="rtl_flist_mgr 0.9.0")
     parser.add_argument("core_file", nargs="?", help="top core TOML or legacy .core file")
     parser.add_argument("-w", "--workspace", help="workspace root; import/* directories are scanned as checkout roots")
     parser.add_argument("-m", "--mode", choices=("sim", "synth", "lint"), default="sim", help="output mode, default: sim")

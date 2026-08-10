@@ -70,6 +70,24 @@ depend = ["dmg:cpu:lsu_harden"]
 
 同一个 core 或文件被多处引用时，只在第一次出现的位置展开/输出；依赖环、重复 `core_id`、缺失文件和路径逃出 Git root 都会报错。
 
+## Flist 最前段
+
+`first: ` 可标记单个 `files` 条目，或 `[core].filesets` 中的一个 fileset。被标记内容进入最终 `.f` 的最前段，多个置顶项仍按其原有展开顺序排列；普通文件和所有依赖展开结果随后输出。
+
+```toml
+[core]
+filesets = ["rtl", "first: prelude"]
+
+[fileset.rtl]
+files = ["first: rtl/soc_pkg.sv", "rtl/soc_top.sv"]
+
+[fileset.prelude]
+depend = ["dmg:common:pkg"]
+files = ["rtl/soc_prelude.sv"]
+```
+
+`first:` 不支持 `depend` 或 `legacy_f`。first fileset 中的 `depend` 仍按普通顺序输出，不会因为 fileset 被置顶而改变依赖的输出优先级。条件可组合为 `is_sim ? (first: sim_model)`。
+
 ## Flag 与模式
 
 条件写作 `condition ? (value)`，支持 `!`、`&&`、`||`。工具内建互斥 flag：`is_sim`、`is_synth`、`is_lint`。条件可作用于文件、fileset 选择项和 `depend` 中的 core ID 引用。
