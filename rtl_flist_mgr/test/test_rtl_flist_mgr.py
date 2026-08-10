@@ -198,6 +198,33 @@ files = ["rtl/top.sv"]
         self.assertEqual((code, stderr), (0, ""))
         self.assertIn((self.work / "rtl/top.sv").as_posix(), output.read_text(encoding="utf-8"))
 
+    def test_supports_emu_and_fpga_modes(self) -> None:
+        common_file = self.write("rtl/common.sv")
+        emu_file = self.write("rtl/emu.sv")
+        fpga_file = self.write("rtl/fpga.sv")
+        synth_file = self.write("rtl/synth.sv")
+        self.write("top.toml", """
+[core]
+id = "dmg:test:top"
+
+[fileset.rtl]
+files = [
+  "rtl/common.sv",
+  "is_emu ? (rtl/emu.sv)",
+  "is_fpga ? (rtl/fpga.sv)",
+  "is_synth ? (rtl/synth.sv)",
+]
+""")
+
+        for mode, selected_file in (("emu", emu_file), ("fpga", fpga_file)):
+            output = self.work / "out" / f"{mode}.f"
+            code, _, stderr = self.invoke(["top.toml", "--workspace", str(self.work), "--mode", mode, "-o", str(output)])
+
+            self.assertEqual((code, stderr), (0, ""))
+            lines = output.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(lines, [common_file.as_posix(), selected_file.as_posix()])
+            self.assertNotIn(synth_file.as_posix(), lines)
+
     def test_places_first_files_and_filesets_before_dependencies(self) -> None:
         normal_file = self.write("rtl/normal.sv")
         first_file = self.write("rtl/first.sv")

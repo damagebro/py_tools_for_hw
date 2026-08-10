@@ -60,13 +60,13 @@ depend = ["!is_synth ? (dmg:cpu:alu_harden)"]
 depend = ["dmg:cpu:lsu_harden"]
 ```
 
-| element            | purpose |
-| ------------------ | ------- |
+| element            | purpose                                                                                             |
+| ------------------ | --------------------------------------------------------------------------------------------------- |
 | `[core]`           | `id` 是稳定 core 标识；`filesets` 是唯一的 fileset 展开顺序来源。省略时按声明顺序展开全部 fileset。 |
-| `[fileset.<name>]` | 一个有序文件集合，只可放 `depend`、`files`、`dir`、`legacy_f`。 |
-| `depend`           | 有序 core ID 数组。当前 fileset 先递归展开其 `depend`，再输出自己的 `files`。 |
-| `files`            | 有序文件数组；文件相对 `dir`，未填 `dir` 时相对 TOML 所在目录。 |
-| `dir`              | 相对所属 Git root，适合将多个 core TOML 集中到 `filelist/` 而 RTL 保持原目录。 |
+| `[fileset.<name>]` | 一个有序文件集合，只可放 `depend`、`files`、`dir`、`legacy_f`。                                     |
+| `depend`           | 有序 core ID 数组。当前 fileset 先递归展开其 `depend`，再输出自己的 `files`。                       |
+| `files`            | 有序文件数组；文件相对 `dir`，未填 `dir` 时相对 TOML 所在目录。                                     |
+| `dir`              | 相对所属 Git root，适合将多个 core TOML 集中到 `filelist/` 而 RTL 保持原目录。                      |
 
 同一个 core 或文件被多处引用时，只在第一次出现的位置展开/输出；依赖环、重复 `core_id`、缺失文件和路径逃出 Git root 都会报错。
 
@@ -90,13 +90,15 @@ files = ["rtl/soc_prelude.sv"]
 
 ## Flag 与模式
 
-条件写作 `condition ? (value)`，支持 `!`、`&&`、`||`。工具内建互斥 flag：`is_sim`、`is_synth`、`is_lint`。条件可作用于文件、fileset 选择项和 `depend` 中的 core ID 引用。
+条件写作 `condition ? (value)`，支持 `!`、`&&`、`||`。工具内建互斥 flag：`is_sim`、`is_synth`、`is_lint`、`is_emu`、`is_fpga`。条件可作用于文件、fileset 选择项和 `depend` 中的 core ID 引用；不提供任意 `--flag`，新增 flag 必须在工具的固定模式映射中登记。
 
-| mode    | active flag | typical use |
-| ------- | ----------- | ----------- |
-| `sim`   | `is_sim`    | 展开 RTL、testbench 和仿真模型。 |
+| mode    | active flag | typical use                                       |
+| ------- | ----------- | ------------------------------------------------- |
+| `sim`   | `is_sim`    | 展开 RTL、testbench 和仿真模型。                  |
 | `synth` | `is_synth`  | 选择用户维护的 stub，或跳过已 harden 的内部 RTL。 |
 | `lint`  | `is_lint`   | 保留待检查 RTL，同时按条件排除 SRAM/DW 仿真模型。 |
+| `emu`   | `is_emu`    | 选择仿真加速器专用 RTL、wrapper 或模型。          |
+| `fpga`  | `is_fpga`   | 选择 FPGA 专用 RTL、wrapper 或约束关联文件。      |
 
 ## 集中管理 Core TOML
 
@@ -126,17 +128,17 @@ cpu/
 
 ## 完整参数
 
-| parameter               | description |
-| ----------------------- | ----------- |
-| `core_file`             | 顶层 core TOML 或 `.core`；生成 flist 时必填。 |
-| `-o <output.f>`         | 生成的 filelist；生成 flist 时必填。 |
-| `-m <sim|synth|lint>`   | 输出模式，默认 `sim`。 |
-| `-w <workspace>`        | workspace 根目录；`import/*/` 自动视为独立 checkout root。生成 flist 时默认当前目录。 |
-| `--path-style`          | `absolute`、`relative` 或 `rootvar`，默认 `absolute`。 |
-| `--var NAME=VALUE`      | `legacy_f` 外部路径变量，可重复指定。 |
-| `--rescan`              | 强制扫描 workspace root 与 `import/*/`，覆盖 `.rtl_flist/core_index.toml`。 |
-| `--list-core`           | 列出 workspace 本体 core，排除 `import/`；未传 `-w` 时优先通过 `.rtl_flist/`、其次 `import/` 向上推断 workspace root，并打印 `root_dir`。 |
-| `-d <directory>`        | 与 `--list-core` 配合，递归列出指定目录下的 core；不解析 depend，也不需要 workspace，并打印该目录为 `root_dir`。 |
+| parameter          | description                                                                                                                               |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `core_file`        | 顶层 core TOML 或 `.core`；生成 flist 时必填。                                                                                            |
+| `-o <output.f>`    | 生成的 filelist；生成 flist 时必填。                                                                                                      |
+| `-m <mode>`        | 输出模式：`sim`、`synth`、`lint`、`emu` 或 `fpga`；默认 `sim`。                                                                           |
+| `-w <workspace>`   | workspace 根目录；`import/*/` 自动视为独立 checkout root。生成 flist 时默认当前目录。                                                     |
+| `--path-style`     | `absolute`、`relative` 或 `rootvar`，默认 `absolute`。                                                                                    |
+| `--var NAME=VALUE` | `legacy_f` 外部路径变量，可重复指定。                                                                                                     |
+| `--rescan`         | 强制扫描 workspace root 与 `import/*/`，覆盖 `.rtl_flist/core_index.toml`。                                                               |
+| `--list-core`      | 列出 workspace 本体 core，排除 `import/`；未传 `-w` 时优先通过 `.rtl_flist/`、其次 `import/` 向上推断 workspace root，并打印 `root_dir`。 |
+| `-d <directory>`   | 与 `--list-core` 配合，递归列出指定目录下的 core；不解析 depend，也不需要 workspace，并打印该目录为 `root_dir`。                          |
 
 ## 固定示例与回归
 

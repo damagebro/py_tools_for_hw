@@ -18,6 +18,13 @@ SKIP_DIRS = {".git", ".rtl_flist", "__pycache__", "build", "out"}
 VARIABLE_RE = re.compile(r"\$(?:\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)\}|(?P<plain>[A-Za-z_][A-Za-z0-9_]*))")
 CONDITION_RE = re.compile(r"^(?P<condition>.+?)\s*\?\s*\((?P<value>.*)\)$")
 FIRST_PREFIX = "first: "
+MODE_FLAGS = {
+    "sim": frozenset({"is_sim"}),
+    "synth": frozenset({"is_synth"}),
+    "lint": frozenset({"is_lint"}),
+    "emu": frozenset({"is_emu"}),
+    "fpga": frozenset({"is_fpga"}),
+}
 
 
 class FlistError(Exception):
@@ -510,7 +517,7 @@ class Resolver:
         self.workspace = workspace
         self.cores = cores
         self.mode = mode
-        self.active_flags = frozenset({"is_sim" if mode == "sim" else f"is_{mode}"})
+        self.active_flags = MODE_FLAGS[mode]
         self.variables = variables
         self.cached_index = cached_index
         self.first_lines: list[OutputLine] = []
@@ -797,10 +804,10 @@ def command_list_core(args: argparse.Namespace) -> int:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate a deterministic RTL filelist from one core file.")
-    parser.add_argument("--version", action="version", version="rtl_flist_mgr 0.9.0")
+    parser.add_argument("--version", action="version", version="rtl_flist_mgr 0.10.0")
     parser.add_argument("core_file", nargs="?", help="top core TOML or legacy .core file")
     parser.add_argument("-w", "--workspace", help="workspace root; import/* directories are scanned as checkout roots")
-    parser.add_argument("-m", "--mode", choices=("sim", "synth", "lint"), default="sim", help="output mode, default: sim")
+    parser.add_argument("-m", "--mode", choices=tuple(MODE_FLAGS), default="sim", help="output mode, default: sim")
     parser.add_argument("--var", dest="variables", action="append", default=[], help="legacy path variable NAME=VALUE")
     parser.add_argument("-o", "--output", help="generated filelist path")
     parser.add_argument("--path-style", choices=("relative", "absolute", "rootvar"), default="absolute")
