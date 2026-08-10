@@ -39,7 +39,7 @@ class RtlFlistMgrTest(unittest.TestCase):
         return code, stdout.getvalue(), stderr.getvalue()
 
     def create_soc_workspace(self) -> None:
-        shutil.copytree(EXAMPLE_DIR, self.work, dirs_exist_ok=True)
+        shutil.copytree(EXAMPLE_DIR, self.work, dirs_exist_ok=True, ignore=shutil.ignore_patterns(".rtl_flist"))
         sram_f = self.work / "import" / "cpu" / "filelist" / "sram_sim_model.f"
         sram_path = (self.work / "import" / "cpu" / "lsu" / "model" / "sram_sim_model.sv").as_posix()
         sram_f.write_text(f"# Legacy SRAM simulation model filelist.\n{sram_path}\n", encoding="utf-8")

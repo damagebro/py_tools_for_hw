@@ -8,7 +8,7 @@ import re
 import sys
 import tomllib
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -353,7 +353,7 @@ def write_core_index(workspace: Path, cores: dict[str, Core]) -> Path:
     ] if import_root.is_dir() else []
     lines = [
         "schema_version = 1",
-        f"generated_at = {toml_quote(datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))}",
+        f"generated_at = {toml_quote(datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S'))}",
         f"import_checkouts = {toml_quote(import_checkouts)}",
         "",
     ]
