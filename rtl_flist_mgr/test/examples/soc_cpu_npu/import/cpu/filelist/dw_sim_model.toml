@@ -1,0 +1,6 @@
+[core]
+id = "dmg:cpu:dw_sim_model"
+
+[fileset.rtl]
+dir = "lsu/model"
+files = ["dw_sim_model.sv"]

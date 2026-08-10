@@ -14,7 +14,8 @@ soc_cpu_npu/
 │   └── soc_top.sv
 └── import/
     ├── cpu/
-    │   ├── filelist/{cpu,alu,lsu}.toml
+    │   ├── filelist/{cpu,alu,lsu,dw_sim_model}.toml
+    │   ├── filelist/sram_sim_model.f
     │   ├── cpu_subsys.sv
     │   ├── alu/alu_harden_top.sv
     │   ├── alu_harden_stub.sv
@@ -22,7 +23,7 @@ soc_cpu_npu/
     └── npu/{npu.toml,npu_subsys.sv}
 ```
 
-本例仅将 CPU 的 core TOML 集中于 `import/cpu/filelist/`；`soc.toml` 与 `import/npu/npu.toml` 保持在原目录，用于对比两种组织方式。
+本例将 CPU 的 core TOML 与 SRAM legacy `.f` 集中于 `import/cpu/filelist/`；`sram_sim_model.f` 使用 `/path/to/cpu/lsu/model/...` 绝对路径模板。实际项目应替换为已部署模型的真实绝对路径；回归测试会将模板替换为临时 workspace 的真实绝对路径。`soc.toml` 与 `import/npu/npu.toml` 保持在原目录，用于对比两种组织方式。
 
 ## 三种模式
 

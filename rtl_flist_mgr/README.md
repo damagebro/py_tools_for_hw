@@ -56,7 +56,7 @@ depend = ["dmg:cpu:lsu_harden"]
 | element            | purpose |
 | ------------------ | ------- |
 | `[core]`           | `id` 是稳定 core 标识；`filesets` 是唯一的 fileset 展开顺序来源。省略时按声明顺序展开全部 fileset。 |
-| `[fileset.<name>]` | 一个有序文件集合，可放 `depend`、`files`、`dir`、`include_dirs`、`defines`、`legacy_f`、`file_type`。 |
+| `[fileset.<name>]` | 一个有序文件集合，只可放 `depend`、`files`、`dir`、`legacy_f`。 |
 | `depend`           | 有序 core ID 数组。当前 fileset 先递归展开其 `depend`，再输出自己的 `files`。 |
 | `files`            | 有序文件数组；文件相对 `dir`，未填 `dir` 时相对 TOML 所在目录。 |
 | `dir`              | 相对所属 Git root，适合将多个 core TOML 集中到 `filelist/` 而 RTL 保持原目录。 |
@@ -95,7 +95,7 @@ cpu/
 
 ## Legacy `.f` 与路径
 
-`legacy_f` 可在 TOML fileset 中封装旧 `.f`，支持普通文件、`-f` / `-F`、`+incdir+`、`+define+`。外部目录由 `--var NAME=VALUE` 显式传入；未支持的 legacy 选项会报错。常见 FuseSoC CAPI2 `.core`、fileset `depend` 与 `targets.default` 也保持兼容。
+`legacy_f` 可在 TOML fileset 中封装旧 `.f`，支持普通文件、`-f` / `-F`、单文件 `-v <file.v>`、`+incdir+`、`+define+`。`-v` 会校验文件存在，并在输出 `.f` 中保留为 `-v <path>`。legacy 路径既可直接写绝对路径，也可使用 `$VAR` / `${VAR}` 并通过 `--var NAME=VALUE` 显式传入。对于 DW、SRAM、PDK 等不适合整理为 core 的历史文件，推荐在 legacy `.f` 中直接维护绝对路径，避免每位使用者重复传入路径变量；变量路径仅用于确有环境差异的旧工程。新 TOML 不支持 `when`、`include_dirs`、`defines`、`file_type`；条件应写在 `core.filesets`、`files` 或 `depend` 的条目中，需要 `+incdir+` 或 `+define+` 的历史工程应回到 legacy `.f`。`-y`、`+libext+`、`-work`、`-L` 等未支持的 legacy 选项会报错。常见 FuseSoC CAPI2 `.core`、fileset `depend` 与 `targets.default` 也保持兼容。
 
 默认 `--path-style absolute`，适合后端、DW/SRAM 等绝对模型目录；也可选择 `relative` 或 `rootvar`。
 
@@ -114,7 +114,7 @@ cpu/
 
 ## 固定示例与回归
 
-`test/examples/soc_cpu_npu/` 提供 `soc -> cpu/npu` 的完整小型 workspace：CPU 的 core TOML 集中到 `import/cpu/filelist/`，同时覆盖依赖顺序、file/fileset/core-ID 条件、用户维护 stub 与仿真模型。
+`test/examples/soc_cpu_npu/` 提供 `soc -> cpu/npu` 的完整小型 workspace：CPU 的 core TOML、legacy `.f` 都集中到 `import/cpu/filelist/`，同时覆盖依赖顺序、file/fileset/core-ID 条件、用户维护 stub 与仿真模型。LSU 中的 SRAM 仿真模型由 `legacy_f` 以 `/path/to/cpu/lsu/model/...` 绝对路径模板引入，DW 仿真模型则作为独立 core 依赖引入。
 
 ![soc_cpu_npu architecture](test/examples/soc_cpu_npu/assets/soc_cpu_npu_arch.png)
 
@@ -125,4 +125,3 @@ python -B test/test_rtl_flist_mgr.py
 ## 使用示例
 
 `rtl_flist_mgr\test\examples\soc_cpu_npu\README.md`
-

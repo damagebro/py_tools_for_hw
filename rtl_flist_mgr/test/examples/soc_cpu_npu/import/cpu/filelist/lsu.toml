@@ -1,14 +1,15 @@
 [core]
 id = "dmg:cpu:lsu_harden"
-filesets = ["rtl", "sim_model"]
+filesets = ["rtl", "sram_sim_model", "dw_sim_model"]
 
 [fileset.rtl]
 dir = "lsu"
 files = ["lsu_harden_top.sv"]
 
-[fileset.sim_model]
-dir = "lsu"
-files = [
-  "!is_synth && !is_lint ? (model/sram_sim_model.sv)",
-  "!is_synth && !is_lint ? (model/dw_sim_model.sv)",
+[fileset.sram_sim_model]
+legacy_f = "!is_synth && !is_lint ? (sram_sim_model.f)"
+
+[fileset.dw_sim_model]
+depend = [
+  "!is_synth && !is_lint ? (dmg:cpu:dw_sim_model)",
 ]

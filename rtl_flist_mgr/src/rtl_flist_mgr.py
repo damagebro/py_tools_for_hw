@@ -40,10 +40,6 @@ class FileSet:
     files: tuple[str, ...]
     depend: tuple[str, ...]
     legacy_f: str | None
-    include_dirs: tuple[str, ...]
-    defines: tuple[str, ...]
-    file_type: str | None
-    when: str | None
 
 
 @dataclass(frozen=True)
@@ -63,7 +59,6 @@ class OutputLine:
     root: Path | None
     core_id: str
     manifest: Path
-    file_type: str | None = None
 
 
 def toml_quote(value: str) -> str:
@@ -180,7 +175,7 @@ def parse_toml_core(path: Path, git_root: Path) -> Core | None:
             raise FlistError("E_MANIFEST", f"invalid fileset in {path}")
         validate_keys(
             raw,
-            {"dir", "files", "depend", "legacy_f", "include_dirs", "defines", "file_type", "when"},
+            {"dir", "files", "depend", "legacy_f"},
             f"[fileset.{name}]",
             path,
         )
@@ -195,10 +190,6 @@ def parse_toml_core(path: Path, git_root: Path) -> Core | None:
             files=files,
             depend=depend,
             legacy_f=legacy_f,
-            include_dirs=string_tuple(raw.get("include_dirs", []), f"fileset.{name}.include_dirs", path),
-            defines=string_tuple(raw.get("defines", []), f"fileset.{name}.defines", path),
-            file_type=string_optional(raw.get("file_type"), f"fileset.{name}.file_type", path),
-            when=string_optional(raw.get("when"), f"fileset.{name}.when", path),
         )
 
     selected = string_tuple(raw_core.get("filesets"), "core.filesets", path) or tuple(filesets)
@@ -258,14 +249,11 @@ def parse_capi2_core(path: Path, git_root: Path) -> Core:
             index += 1
         files: list[str] = []
         depend: list[str] = []
-        file_type: str | None = None
         in_files = False
         files_indent = 0
         in_depend = False
         depend_indent = 0
         for item_indent, item_text in block:
-            if item_text.startswith("file_type:"):
-                file_type = yaml_scalar(item_text.split(":", maxsplit=1)[1])
             if item_text == "files:":
                 in_files = True
                 files_indent = item_indent
@@ -287,7 +275,7 @@ def parse_capi2_core(path: Path, git_root: Path) -> Core:
             if in_depend and item_text.startswith("- "):
                 depend.append(yaml_scalar(item_text[2:]))
         if files or depend:
-            filesets[fileset_name] = FileSet(fileset_name, None, tuple(files), tuple(depend), None, (), (), file_type, None)
+            filesets[fileset_name] = FileSet(fileset_name, None, tuple(files), tuple(depend), None)
 
     target_filesets: dict[str, tuple[str, ...]] = {}
     raw_targets = section_range("targets")
@@ -400,14 +388,6 @@ def resolve_legacy_path(value: str, base: Path, variables: dict[str, str], sourc
     return path.resolve() if path.is_absolute() else (base / path).resolve()
 
 
-def infer_file_type(path: Path) -> str:
-    if path.suffix.lower() in {".sv", ".svh"}:
-        return "systemVerilogSource"
-    if path.suffix.lower() in {".v", ".vh"}:
-        return "verilogSource"
-    return "unknown"
-
-
 class Resolver:
     def __init__(self, workspace: Path, cores: dict[str, Core], mode: str, variables: dict[str, str]) -> None:
         self.workspace = workspace
@@ -416,7 +396,7 @@ class Resolver:
         self.active_flags = frozenset({"is_sim" if mode == "sim" else f"is_{mode}"})
         self.variables = variables
         self.lines: list[OutputLine] = []
-        self.emitted_files: dict[Path, OutputLine] = {}
+        self.emitted_files: set[Path] = set()
         self.emitted_options: set[tuple[str, str]] = set()
         self.visited: set[str] = set()
         self.active: list[str] = []
@@ -447,24 +427,18 @@ class Resolver:
         fileset = core.filesets.get(fileset_name)
         if fileset is None:
             raise FlistError("E_FILESET", f"core '{core.core_id}' has no fileset '{fileset_name}'")
-        if fileset.when is not None and condition_value(f"{fileset.when} ? (enabled)", self.active_flags, core.manifest) is None:
-            return
         for dependency_value in fileset.depend:
             self.resolve_dependency(core, dependency_value)
         base = core.git_root / fileset.directory if fileset.directory is not None else core.manifest.parent
         base = base.resolve()
-        for include_dir in fileset.include_dirs:
-            self.emit_option("incdir", str(resolve_local_path(include_dir, base, core.git_root, self.variables, core.manifest)), core)
-        for define in fileset.defines:
-            self.emit_option("define", define, core)
         for file_name in fileset.files:
             selected = condition_value(file_name, self.active_flags, core.manifest)
             if selected is not None:
-                self.emit_file(resolve_local_path(selected, base, core.git_root, self.variables, core.manifest), core, fileset.file_type)
+                self.emit_file(resolve_local_path(selected, base, core.git_root, self.variables, core.manifest), core)
         if fileset.legacy_f is not None:
             selected = condition_value(fileset.legacy_f, self.active_flags, core.manifest)
             if selected is not None:
-                self.resolve_legacy_f(resolve_legacy_path(selected, base, self.variables, core.manifest), core, fileset.file_type, ())
+                self.resolve_legacy_f(resolve_legacy_path(selected, base, self.variables, core.manifest), core, ())
 
     def resolve_dependency(self, parent: Core, dependency_value: str) -> None:
         dependency_id = condition_value(dependency_value, self.active_flags, parent.manifest)
@@ -473,7 +447,7 @@ class Resolver:
         self.tree_edges.append((parent.core_id, dependency_id))
         self.resolve_core(dependency_id)
 
-    def resolve_legacy_f(self, path: Path, core: Core, file_type: str | None, stack: tuple[Path, ...]) -> None:
+    def resolve_legacy_f(self, path: Path, core: Core, stack: tuple[Path, ...]) -> None:
         if path in stack:
             raise FlistError("E_LEGACY_CYCLE", f"legacy_f include cycle: {path}")
         try:
@@ -495,11 +469,17 @@ class Resolver:
                         self.emit_option("define", item, core)
                 continue
             if line.startswith(("-f ", "-F ")):
-                self.resolve_legacy_f(resolve_legacy_path(line[3:].strip(), path.parent, self.variables, path), core, file_type, (*stack, path))
+                self.resolve_legacy_f(resolve_legacy_path(line[3:].strip(), path.parent, self.variables, path), core, (*stack, path))
                 continue
-            if line.startswith(("-y", "+libext+", "-v ", "-work", "-L ")):
+            if line == "-v" or line.startswith(("-v ", "-v\t")):
+                library_file = line[2:].strip()
+                if not library_file:
+                    raise FlistError("E_LEGACY_F", f"-v requires one Verilog file in {path}")
+                self.emit_library_file(resolve_legacy_path(library_file, path.parent, self.variables, path), core)
+                continue
+            if line.startswith(("-y", "+libext+", "-work", "-L ")):
                 raise FlistError("E_LEGACY_F", f"unsupported legacy_f option in {path}: {line}")
-            self.emit_file(resolve_legacy_path(line, path.parent, self.variables, path), core, file_type)
+            self.emit_file(resolve_legacy_path(line, path.parent, self.variables, path), core)
 
     def emit_option(self, kind: str, value: str, core: Core) -> None:
         key = (kind, value)
@@ -507,20 +487,21 @@ class Resolver:
             self.emitted_options.add(key)
             self.lines.append(OutputLine(kind, value, core.git_root, core.core_id, core.manifest))
 
-    def emit_file(self, path: Path, core: Core, file_type: str | None) -> None:
+    def emit_file(self, path: Path, core: Core) -> None:
         if not path.is_file():
             raise FlistError("E_FILE_MISSING", f"RTL file not found: {path}", (f"core: {core.core_id}",))
-        self._emit_file(path, core.git_root, core.core_id, core.manifest, file_type or infer_file_type(path))
+        self._emit_file(path, core.git_root, core.core_id, core.manifest)
 
-    def _emit_file(self, path: Path, root: Path | None, core_id: str, manifest: Path, file_type: str) -> None:
-        previous = self.emitted_files.get(path)
-        if previous is not None:
-            if previous.file_type != file_type:
-                raise FlistError("E_FILE_TYPE_CONFLICT", f"file has conflicting types: {path}")
+    def emit_library_file(self, path: Path, core: Core) -> None:
+        if not path.is_file():
+            raise FlistError("E_FILE_MISSING", f"Verilog library file not found: {path}", (f"core: {core.core_id}",))
+        self.emit_option("vfile", str(path), core)
+
+    def _emit_file(self, path: Path, root: Path | None, core_id: str, manifest: Path) -> None:
+        if path in self.emitted_files:
             return
-        line = OutputLine("file", str(path), root, core_id, manifest, file_type)
-        self.emitted_files[path] = line
-        self.lines.append(line)
+        self.emitted_files.add(path)
+        self.lines.append(OutputLine("file", str(path), root, core_id, manifest))
 
     def tree_text(self, top_core: str) -> str:
         children: dict[str, list[str]] = {}
@@ -583,6 +564,8 @@ def render_flist(lines: tuple[OutputLine, ...], workspace: Path, output: Path, s
             rendered.append(format_path(line, workspace, output, style))
         elif line.kind == "incdir":
             rendered.append(f"+incdir+{format_path(line, workspace, output, style)}")
+        elif line.kind == "vfile":
+            rendered.append(f"-v {format_path(line, workspace, output, style)}")
         else:
             rendered.append(f"+define+{line.value}")
     return "\n".join(rendered) + "\n"

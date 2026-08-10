@@ -40,11 +40,24 @@ class RtlFlistMgrTest(unittest.TestCase):
 
     def create_soc_workspace(self) -> None:
         shutil.copytree(EXAMPLE_DIR, self.work, dirs_exist_ok=True)
+        sram_f = self.work / "import" / "cpu" / "filelist" / "sram_sim_model.f"
+        sram_path = (self.work / "import" / "cpu" / "lsu" / "model" / "sram_sim_model.sv").as_posix()
+        sram_f.write_text(f"# Legacy SRAM simulation model filelist.\n{sram_path}\n", encoding="utf-8")
 
     def generate(self, mode: str) -> tuple[list[str], str]:
         output = self.work / "out" / f"soc_{mode}.f"
         code, stdout, stderr = self.invoke(
-            ["soc.toml", "--workspace", str(self.work), "--mode", mode, "-o", str(output), "--path-style", "absolute"]
+            [
+                "soc.toml",
+                "--workspace",
+                str(self.work),
+                "--mode",
+                mode,
+                "-o",
+                str(output),
+                "--path-style",
+                "absolute",
+            ]
         )
         self.assertEqual((code, stderr), (0, ""))
         self.assertIn("resolved", stdout)
@@ -137,6 +150,40 @@ files = ["rtl/top.sv"]
         self.assertEqual(code, 1)
         self.assertIn("ERROR [E_MANIFEST]: unsupported [core] property: top_module_name", stderr)
 
+    def test_rejects_removed_toml_compile_options(self) -> None:
+        self.write("rtl/top.sv")
+        self.write("top.toml", """
+[core]
+id = "dmg:test:top"
+
+[fileset.rtl]
+files = ["rtl/top.sv"]
+include_dirs = ["rtl/include"]
+defines = ["TOP_ASSERT"]
+file_type = "systemVerilogSource"
+""")
+
+        code, _, stderr = self.invoke(["top.toml", "--workspace", str(self.work), "-o", str(self.work / "out.f")])
+
+        self.assertEqual(code, 1)
+        self.assertIn("ERROR [E_MANIFEST]: unsupported [fileset.rtl] property: defines", stderr)
+
+    def test_rejects_removed_toml_when(self) -> None:
+        self.write("rtl/top.sv")
+        self.write("top.toml", """
+[core]
+id = "dmg:test:top"
+
+[fileset.rtl]
+when = "is_sim"
+files = ["rtl/top.sv"]
+""")
+
+        code, _, stderr = self.invoke(["top.toml", "--workspace", str(self.work), "-o", str(self.work / "out.f")])
+
+        self.assertEqual(code, 1)
+        self.assertIn("ERROR [E_MANIFEST]: unsupported [fileset.rtl] property: when", stderr)
+
     def test_supports_fusesoc_four_part_core_id(self) -> None:
         self.write("rtl/top.sv")
         self.write("top.toml", """
@@ -150,6 +197,72 @@ files = ["rtl/top.sv"]
         code, _, stderr = self.invoke(["top.toml", "--workspace", str(self.work), "-o", str(output)])
         self.assertEqual((code, stderr), (0, ""))
         self.assertIn((self.work / "rtl/top.sv").as_posix(), output.read_text(encoding="utf-8"))
+
+    def test_preserves_legacy_v_library_file(self) -> None:
+        library_file = self.write("rtl/legacy_cell.v", "module legacy_cell; endmodule\n")
+        self.write("legacy.f", "-v rtl/legacy_cell.v\n")
+        self.write("top.toml", """
+[core]
+id = "dmg:test:top"
+
+[fileset.rtl]
+legacy_f = "legacy.f"
+""")
+        output = self.work / "out.f"
+
+        code, _, stderr = self.invoke(["top.toml", "--workspace", str(self.work), "-o", str(output)])
+
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(output.read_text(encoding="utf-8"), f"-v {library_file.as_posix()}\n")
+
+    def test_supports_legacy_environment_variable_path(self) -> None:
+        model_file = self.write("external/model.sv", "module model; endmodule\n")
+        self.write("legacy.f", "${MODEL_ROOT}/model.sv\n")
+        self.write("top.toml", """
+[core]
+id = "dmg:test:top"
+
+[fileset.rtl]
+legacy_f = "legacy.f"
+""")
+        output = self.work / "out.f"
+
+        code, _, stderr = self.invoke(
+            [
+                "top.toml",
+                "--workspace",
+                str(self.work),
+                "--var",
+                f"MODEL_ROOT={model_file.parent}",
+                "-o",
+                str(output),
+            ]
+        )
+
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(output.read_text(encoding="utf-8"), f"{model_file.as_posix()}\n")
+
+    def test_preserves_legacy_compile_options(self) -> None:
+        include_dir = self.work / "rtl" / "include"
+        include_dir.mkdir(parents=True)
+        source_file = self.write("rtl/top.sv")
+        self.write("legacy.f", "+incdir+rtl/include\n+define+TOP_ASSERT=1\nrtl/top.sv\n")
+        self.write("top.toml", """
+[core]
+id = "dmg:test:top"
+
+[fileset.rtl]
+legacy_f = "legacy.f"
+""")
+        output = self.work / "out.f"
+
+        code, _, stderr = self.invoke(["top.toml", "--workspace", str(self.work), "-o", str(output)])
+
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(
+            output.read_text(encoding="utf-8"),
+            f"+incdir+{include_dir.as_posix()}\n+define+TOP_ASSERT=1\n{source_file.as_posix()}\n",
+        )
 
     def test_list_core_excludes_imported_cores(self) -> None:
         self.create_soc_workspace()
