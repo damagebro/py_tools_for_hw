@@ -271,6 +271,38 @@ legacy_f = "legacy.f"
         self.assertIn("dmg:soc:top", stdout)
         self.assertNotIn("dmg:cpu:subsys", stdout)
 
+    def test_core_index_cache_and_rescan(self) -> None:
+        self.create_soc_workspace()
+        index = self.work / ".rtl_flist" / "core_index.toml"
+
+        code, stdout, stderr = self.invoke(["--workspace", str(self.work), "--list-core"])
+
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertIn("(scan)", stdout)
+        self.assertTrue(index.is_file())
+        self.assertIn('"dmg:cpu:subsys"', index.read_text(encoding="utf-8"))
+
+        self.write("rtl/cache_added.sv")
+        self.write("cache_added.toml", """
+[core]
+id = "dmg:test:cache_added"
+
+[fileset.rtl]
+files = ["rtl/cache_added.sv"]
+""")
+
+        code, stdout, stderr = self.invoke(["--workspace", str(self.work), "--list-core"])
+
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertIn("(cache)", stdout)
+        self.assertNotIn("dmg:test:cache_added", stdout)
+
+        code, stdout, stderr = self.invoke(["--workspace", str(self.work), "--list-core", "--rescan"])
+
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertIn("(rescan)", stdout)
+        self.assertIn("dmg:test:cache_added", stdout)
+
     def test_list_core_directory(self) -> None:
         self.create_soc_workspace()
         directory = self.work / "import" / "cpu" / "filelist"

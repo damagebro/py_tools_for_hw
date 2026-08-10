@@ -28,10 +28,17 @@ python -B src/rtl_flist_mgr.py <core_file> -m lint  -o <output.f>
 python -B src/rtl_flist_mgr.py --list-core
 python -B src/rtl_flist_mgr.py --list-core -w <workspace>
 python -B src/rtl_flist_mgr.py --list-core -d <directory>
+python -B src/rtl_flist_mgr.py --list-core --rescan
 python -B src/rtl_flist_mgr.py --help
 ```
 
 生成 flist 时，`-w <workspace>` 默认当前目录。`--list-core` 未传 `-w` 时会从当前目录向上寻找 workspace root：优先最近含 `.rtl_flist/` 的目录，其次最近含 `import/` 的目录；两者均不存在时，以当前目录为 root。每次 `--list-core` 都先打印 `root_dir: <path> (<source>)`，便于确认本次推断结果。默认查询仅列 root 本体 core，排除 `import/`。
+
+## Core 索引缓存
+
+workspace 命令首次执行时扫描 root 与 `import/*/`，将 `core_id`、corefile 路径、Git root 和格式写入 `.rtl_flist/core_index.toml`。之后 `--list-core` 直接读取该索引，不再递归扫描 workspace；生成 `.f` 也按索引定位并解析已登记 corefile。输出中的 `core_index: ... (scan|cache|rescan)` 说明本次来源。
+
+新增、删除、移动 corefile，或修改 `core_id`、`depend` 后，必须显式使用 `--rescan` 刷新缓存。工具不会检查目录时间戳，避免每次调用重新扫描。`--list-core -d <directory>` 是临时目录查询，始终直接扫描且不读写 workspace 缓存。
 
 ## Core TOML
 
@@ -109,6 +116,7 @@ cpu/
 | `-w <workspace>`        | workspace 根目录；`import/*/` 自动视为独立 checkout root。生成 flist 时默认当前目录。 |
 | `--path-style`          | `absolute`、`relative` 或 `rootvar`，默认 `absolute`。 |
 | `--var NAME=VALUE`      | `legacy_f` 外部路径变量，可重复指定。 |
+| `--rescan`              | 强制扫描 workspace root 与 `import/*/`，覆盖 `.rtl_flist/core_index.toml`。 |
 | `--list-core`           | 列出 workspace 本体 core，排除 `import/`；未传 `-w` 时优先通过 `.rtl_flist/`、其次 `import/` 向上推断 workspace root，并打印 `root_dir`。 |
 | `-d <directory>`        | 与 `--list-core` 配合，递归列出指定目录下的 core；不解析 depend，也不需要 workspace，并打印该目录为 `root_dir`。 |
 

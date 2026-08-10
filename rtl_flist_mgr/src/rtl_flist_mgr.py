@@ -8,6 +8,7 @@ import re
 import sys
 import tomllib
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,14 @@ class Core:
     format_name: str
     filesets: dict[str, FileSet]
     selected_filesets: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class CoreIndexEntry:
+    core_id: str
+    manifest: Path
+    git_root: Path
+    format_name: str
 
 
 @dataclass(frozen=True)
@@ -322,10 +331,32 @@ def scan_cores(
     return cores
 
 
+def core_index_path(workspace: Path) -> Path:
+    return workspace / STATE_DIR / "core_index.toml"
+
+
+def core_index_entries(cores: dict[str, Core]) -> dict[str, CoreIndexEntry]:
+    return {
+        core_id: CoreIndexEntry(core_id, core.manifest, core.git_root, core.format_name)
+        for core_id, core in cores.items()
+    }
+
+
 def write_core_index(workspace: Path, cores: dict[str, Core]) -> Path:
-    output = workspace / STATE_DIR / "core_index.toml"
+    output = core_index_path(workspace)
     output.parent.mkdir(parents=True, exist_ok=True)
-    lines = ["schema_version = 1", ""]
+    import_root = workspace / "import"
+    import_checkouts = [
+        f"import/{item.name}"
+        for item in sorted(import_root.iterdir(), key=lambda item: item.name)
+        if item.is_dir()
+    ] if import_root.is_dir() else []
+    lines = [
+        "schema_version = 1",
+        f"generated_at = {toml_quote(datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))}",
+        f"import_checkouts = {toml_quote(import_checkouts)}",
+        "",
+    ]
     for core_id in sorted(cores):
         core = cores[core_id]
         lines.extend((
@@ -337,6 +368,71 @@ def write_core_index(workspace: Path, cores: dict[str, Core]) -> Path:
         ))
     output.write_text("\n".join(lines), encoding="utf-8")
     return output
+
+
+def resolve_index_path(workspace: Path, value: object, field: str, index: Path) -> Path:
+    if not isinstance(value, str) or not value:
+        raise FlistError("E_CORE_CACHE", f"invalid {field} in {index}; run --rescan")
+    path = (workspace / value).resolve()
+    try:
+        path.relative_to(workspace)
+    except ValueError as exc:
+        raise FlistError("E_CORE_CACHE", f"cached {field} escapes workspace in {index}; run --rescan") from exc
+    return path
+
+
+def read_core_index(workspace: Path) -> dict[str, CoreIndexEntry]:
+    index = core_index_path(workspace)
+    data = read_toml(index, "core index")
+    if data.get("schema_version") != 1:
+        raise FlistError("E_CORE_CACHE", f"unsupported core index schema: {index}; run --rescan")
+    raw_cores = data.get("core")
+    if not isinstance(raw_cores, dict):
+        raise FlistError("E_CORE_CACHE", f"core index has no core entries: {index}; run --rescan")
+
+    entries: dict[str, CoreIndexEntry] = {}
+    for core_id, raw_entry in raw_cores.items():
+        if not isinstance(core_id, str) or not isinstance(raw_entry, dict):
+            raise FlistError("E_CORE_CACHE", f"invalid core entry in {index}; run --rescan")
+        format_name = raw_entry.get("format")
+        if not isinstance(format_name, str) or not format_name:
+            raise FlistError("E_CORE_CACHE", f"invalid core format in {index}; run --rescan")
+        entries[core_id] = CoreIndexEntry(
+            core_id,
+            resolve_index_path(workspace, raw_entry.get("manifest"), "manifest", index),
+            resolve_index_path(workspace, raw_entry.get("git_root"), "git_root", index),
+            format_name,
+        )
+    return entries
+
+
+def load_cached_cores(workspace: Path, entries: dict[str, CoreIndexEntry]) -> dict[str, Core]:
+    cores: dict[str, Core] = {}
+    for core_id, entry in entries.items():
+        if not entry.manifest.is_file():
+            raise FlistError("E_CORE_CACHE", f"cached core manifest is missing: {entry.manifest}; run --rescan")
+        if not entry.git_root.is_dir():
+            raise FlistError("E_CORE_CACHE", f"cached Git root is missing: {entry.git_root}; run --rescan")
+        core = parse_toml_core(entry.manifest, entry.git_root) if entry.manifest.suffix == ".toml" else parse_capi2_core(entry.manifest, entry.git_root)
+        if core is None or core.core_id != core_id or core.format_name != entry.format_name:
+            raise FlistError("E_CORE_CACHE", f"cached core entry changed: {entry.manifest}; run --rescan")
+        cores[core_id] = core
+    return cores
+
+
+def load_or_scan_core_index(
+    workspace: Path,
+    repositories: tuple[WorkspaceRepository, ...],
+    rescan: bool,
+) -> tuple[dict[str, CoreIndexEntry], str]:
+    index = core_index_path(workspace)
+    if index.is_file() and not rescan:
+        return read_core_index(workspace), "cache"
+    cores = scan_cores(workspace, repositories)
+    if not cores:
+        raise FlistError("E_CORE_NOT_FOUND", f"no core manifests found under {workspace}")
+    write_core_index(workspace, cores)
+    return core_index_entries(cores), "rescan" if rescan else "scan"
 
 
 def condition_value(value: str, active_flags: frozenset[str], source: Path) -> str | None:
@@ -389,12 +485,13 @@ def resolve_legacy_path(value: str, base: Path, variables: dict[str, str], sourc
 
 
 class Resolver:
-    def __init__(self, workspace: Path, cores: dict[str, Core], mode: str, variables: dict[str, str]) -> None:
+    def __init__(self, workspace: Path, cores: dict[str, Core], mode: str, variables: dict[str, str], cached_index: bool) -> None:
         self.workspace = workspace
         self.cores = cores
         self.mode = mode
         self.active_flags = frozenset({"is_sim" if mode == "sim" else f"is_{mode}"})
         self.variables = variables
+        self.cached_index = cached_index
         self.lines: list[OutputLine] = []
         self.emitted_files: set[Path] = set()
         self.emitted_options: set[tuple[str, str]] = set()
@@ -412,6 +509,8 @@ class Resolver:
             raise FlistError("E_CORE_CYCLE", "core dependency cycle detected", (" -> ".join(cycle),))
         core = self.cores.get(core_id)
         if core is None:
+            if self.cached_index:
+                raise FlistError("E_CORE_NOT_FOUND", f"core '{core_id}' is absent from cached core index; run --rescan")
             raise FlistError("E_CORE_NOT_FOUND", f"core '{core_id}' was not found")
         if core_id in self.visited:
             return
@@ -571,13 +670,16 @@ def render_flist(lines: tuple[OutputLine, ...], workspace: Path, output: Path, s
     return "\n".join(rendered) + "\n"
 
 
-def build_resolver(workspace_arg: str, mode: str, variables: dict[str, str]) -> tuple[Path, dict[str, Core], Resolver]:
+def build_resolver(
+    workspace_arg: str,
+    mode: str,
+    variables: dict[str, str],
+    rescan: bool,
+) -> tuple[Path, dict[str, Core], Resolver, str]:
     workspace, repositories = load_workspace(workspace_arg)
-    cores = scan_cores(workspace, repositories)
-    if not cores:
-        raise FlistError("E_CORE_NOT_FOUND", f"no core manifests found under {workspace}")
-    write_core_index(workspace, cores)
-    return workspace, cores, Resolver(workspace, cores, mode, variables)
+    entries, cache_source = load_or_scan_core_index(workspace, repositories, rescan)
+    cores = load_cached_cores(workspace, entries)
+    return workspace, cores, Resolver(workspace, cores, mode, variables, cache_source == "cache"), cache_source
 
 
 def core_from_file(core_file: str, workspace: Path, cores: dict[str, Core]) -> Core:
@@ -593,13 +695,14 @@ def core_from_file(core_file: str, workspace: Path, cores: dict[str, Core]) -> C
 
 def command_generate(args: argparse.Namespace) -> int:
     workspace_arg = args.workspace or "."
-    workspace, cores, resolver = build_resolver(workspace_arg, args.mode, parse_variables(args.variables))
+    workspace, cores, resolver, cache_source = build_resolver(workspace_arg, args.mode, parse_variables(args.variables), args.rescan)
     core = core_from_file(args.core_file, workspace, cores)
     output = Path(args.output).resolve()
     lines = resolver.resolve(core.core_id)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(render_flist(lines, workspace, output, args.path_style), encoding="utf-8")
     (workspace / STATE_DIR / "core_tree.txt").write_text(resolver.tree_text(core.core_id), encoding="utf-8")
+    print(f"core_index: {core_index_path(workspace)} ({cache_source})")
     print(f"resolved {len(lines)} line(s): {output}")
     return 0
 
@@ -621,9 +724,16 @@ def command_list_core(args: argparse.Namespace) -> int:
             workspace, root_source = find_workspace_root(Path.cwd())
             workspace_arg = str(workspace)
         workspace, repositories = load_workspace(workspace_arg)
-        cores = scan_cores(workspace, (repositories[0],))
+        entries, cache_source = load_or_scan_core_index(workspace, repositories, args.rescan)
+        cores = {
+            core_id: entry
+            for core_id, entry in entries.items()
+            if entry.git_root == workspace
+        }
         display_root = workspace
     print(f"root_dir: {display_root} ({root_source})")
+    if not args.directory:
+        print(f"core_index: {core_index_path(display_root)} ({cache_source})")
     for core_id in sorted(cores):
         core = cores[core_id]
         print(f"{core_id:<40}  {core.manifest.relative_to(display_root).as_posix()}")
@@ -632,13 +742,14 @@ def command_list_core(args: argparse.Namespace) -> int:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate a deterministic RTL filelist from one core file.")
-    parser.add_argument("--version", action="version", version="rtl_flist_mgr 0.7.0")
+    parser.add_argument("--version", action="version", version="rtl_flist_mgr 0.8.0")
     parser.add_argument("core_file", nargs="?", help="top core TOML or legacy .core file")
     parser.add_argument("-w", "--workspace", help="workspace root; import/* directories are scanned as checkout roots")
     parser.add_argument("-m", "--mode", choices=("sim", "synth", "lint"), default="sim", help="output mode, default: sim")
     parser.add_argument("--var", dest="variables", action="append", default=[], help="legacy path variable NAME=VALUE")
     parser.add_argument("-o", "--output", help="generated filelist path")
     parser.add_argument("--path-style", choices=("relative", "absolute", "rootvar"), default="absolute")
+    parser.add_argument("--rescan", action="store_true", help="rescan workspace corefiles and overwrite .rtl_flist/core_index.toml")
     parser.add_argument("-d", "--directory", help="directory for --list-core; recursively list core IDs below it")
     parser.add_argument("--list-core", action="store_true", help="list workspace core IDs outside import/")
     args = parser.parse_args(argv)
@@ -647,6 +758,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             parser.error("--list-core does not accept core_file or --output")
         if args.directory is not None and args.workspace is not None:
             parser.error("--directory and --workspace cannot be used together with --list-core")
+        if args.directory is not None and args.rescan:
+            parser.error("--rescan cannot be used with --directory")
     elif args.core_file is None or args.output is None:
         parser.error("core_file and --output are required unless --list-core is used")
     elif args.directory is not None:
