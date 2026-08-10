@@ -22,6 +22,7 @@ class ToolSpec:
     example: str | None = None
     smoke_args: tuple[str, ...] = ()
     smoke_outputs: tuple[str, ...] = ()
+    smoke_stdout: tuple[str, ...] = ()
     unit_tests: tuple[str, ...] = ()
     unit_cwd: str | None = None
     contract_enabled: bool = True
@@ -127,6 +128,34 @@ TOOL_SPECS = (
         smoke_outputs=("sim/Makefile", "sim/ENV.sh", "sim/tb/top.sv"),
         unit_tests=("py_rtl_sim/gen_tb_demo/test/test_gen_tb.py",),
         unit_cwd="py_rtl_sim/gen_tb_demo",
+    ),
+    ToolSpec(
+        name="git_repo_mgr",
+        script="git_repo_mgr/src/git_repo_mgr.py",
+        description="Manage recursive multi-Git workspace dependencies.",
+        usage="hw_tool de git_repo_mgr <command> [options]",
+        doc_url="https://github.com/damagebro/py_tools_for_hw/blob/main/git_repo_mgr/README.md",
+        readme="git_repo_mgr/README.md",
+        repository_name="py_tools_for_hw",
+        example="git_repo_mgr/README.md",
+        smoke_args=("--help",),
+        smoke_stdout=("Manage a recursively declared multi-Git workspace.",),
+        unit_tests=("git_repo_mgr/test/test_git_repo_mgr.py",),
+        unit_cwd="git_repo_mgr",
+    ),
+    ToolSpec(
+        name="rtl_flist_mgr",
+        script="rtl_flist_mgr/src/rtl_flist_mgr.py",
+        description="Resolve distributed RTL cores into deterministic filelists.",
+        usage="hw_tool de rtl_flist_mgr <core_file> -o <output.f> [-m sim|synth|lint|emu|fpga] [options]",
+        doc_url="https://github.com/damagebro/py_tools_for_hw/blob/main/rtl_flist_mgr/README.md",
+        readme="rtl_flist_mgr/README.md",
+        repository_name="py_tools_for_hw",
+        example="rtl_flist_mgr/README.md",
+        smoke_args=("--help",),
+        smoke_stdout=("Generate a deterministic RTL filelist from one core file.",),
+        unit_tests=("rtl_flist_mgr/test/test_rtl_flist_mgr.py",),
+        unit_cwd="rtl_flist_mgr",
     ),
 )
 

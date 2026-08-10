@@ -376,7 +376,7 @@ def verify_tool_contract(tool: ToolSpec) -> bool:
         example = source_root / tool.example
         if not example.exists():
             raise HwToolError(f"minimum example not found: {example}")
-        if not tool.smoke_args or not tool.smoke_outputs:
+        if not tool.smoke_args or not (tool.smoke_outputs or getattr(tool, "smoke_stdout", ())):
             raise HwToolError("missing smoke test registration")
         if not tool.unit_tests:
             raise HwToolError("missing unit test registration")
@@ -484,6 +484,15 @@ def run_smoke_test(tool: ToolSpec, source_root: Path) -> bool:
         if missing:
             print(
                 f"[fail] {tool.name}: smoke missing output: {', '.join(missing)}",
+                file=sys.stderr,
+            )
+            return False
+        missing_stdout = [
+            text for text in getattr(tool, "smoke_stdout", ()) if text not in completed.stdout
+        ]
+        if missing_stdout:
+            print(
+                f"[fail] {tool.name}: smoke missing stdout: {', '.join(missing_stdout)}",
                 file=sys.stderr,
             )
             return False

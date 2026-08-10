@@ -24,6 +24,7 @@ class ToolSpec:
     example: str | None = None
     smoke_args: tuple[str, ...] = ()
     smoke_outputs: tuple[str, ...] = ()
+    smoke_stdout: tuple[str, ...] = ()
     unit_tests: tuple[str, ...] = ()
     unit_cwd: str | None = None
     contract_enabled: bool = True

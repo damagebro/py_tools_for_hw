@@ -1,5 +1,7 @@
 __pycache__*
 *build*
+out/
 .hw_tool_smoke/
 .test_work/
 _work/
+doc/plan_*
