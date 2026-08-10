@@ -273,6 +273,26 @@ depend = ["first: dmg:test:leaf"]
         self.assertEqual(code, 1)
         self.assertIn("ERROR [E_MANIFEST]: first: is not supported in fileset.rtl.depend", stderr)
 
+    def test_warns_for_same_filename_in_different_paths(self) -> None:
+        cpu_file = self.write("rtl/cpu/spram100x10.sv")
+        npu_file = self.write("rtl/npu/spram100x10.sv")
+        self.write("top.toml", """
+[core]
+id = "dmg:test:top"
+
+[fileset.rtl]
+files = ["rtl/cpu/spram100x10.sv", "rtl/npu/spram100x10.sv"]
+""")
+        output = self.work / "out.f"
+
+        code, _, stderr = self.invoke(["top.toml", "--workspace", str(self.work), "-o", str(output)])
+
+        self.assertEqual(code, 0)
+        self.assertIn("WARNING [W_FILE_NAME_CONFLICT]: 'spram100x10.sv'", stderr)
+        self.assertIn(cpu_file.as_posix(), stderr)
+        self.assertIn(npu_file.as_posix(), stderr)
+        self.assertEqual(output.read_text(encoding="utf-8").splitlines(), [cpu_file.as_posix(), npu_file.as_posix()])
+
     def test_preserves_legacy_v_library_file(self) -> None:
         library_file = self.write("rtl/legacy_cell.v", "module legacy_cell; endmodule\n")
         self.write("legacy.f", "-v rtl/legacy_cell.v\n")

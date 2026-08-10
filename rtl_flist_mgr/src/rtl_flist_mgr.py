@@ -523,6 +523,8 @@ class Resolver:
         self.first_lines: list[OutputLine] = []
         self.lines: list[OutputLine] = []
         self.emitted_files: dict[Path, tuple[OutputLine, bool]] = {}
+        self.first_path_by_name: dict[str, Path] = {}
+        self.warned_file_names: set[str] = set()
         self.emitted_options: dict[tuple[str, str], tuple[OutputLine, bool]] = {}
         self.visited: set[str] = set()
         self.active: list[str] = []
@@ -660,6 +662,14 @@ class Resolver:
                 self.first_lines.append(line)
                 self.emitted_files[path] = (line, True)
             return
+        first_path = self.first_path_by_name.setdefault(path.name, path)
+        if first_path != path and path.name not in self.warned_file_names:
+            self.warned_file_names.add(path.name)
+            print(
+                f"WARNING [W_FILE_NAME_CONFLICT]: '{path.name}' appears in multiple paths: "
+                f"{first_path.as_posix()} ; {path.as_posix()}",
+                file=sys.stderr,
+            )
         line = OutputLine("file", str(path), root, core_id, manifest)
         self.emitted_files[path] = (line, first_output)
         (self.first_lines if first_output else self.lines).append(line)
@@ -804,7 +814,7 @@ def command_list_core(args: argparse.Namespace) -> int:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate a deterministic RTL filelist from one core file.")
-    parser.add_argument("--version", action="version", version="rtl_flist_mgr 0.10.0")
+    parser.add_argument("--version", action="version", version="rtl_flist_mgr 0.11.0")
     parser.add_argument("core_file", nargs="?", help="top core TOML or legacy .core file")
     parser.add_argument("-w", "--workspace", help="workspace root; import/* directories are scanned as checkout roots")
     parser.add_argument("-m", "--mode", choices=tuple(MODE_FLAGS), default="sim", help="output mode, default: sim")

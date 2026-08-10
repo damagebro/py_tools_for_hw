@@ -68,7 +68,14 @@ depend = ["dmg:cpu:lsu_harden"]
 | `files`            | 有序文件数组；文件相对 `dir`，未填 `dir` 时相对 TOML 所在目录。                                     |
 | `dir`              | 相对所属 Git root，适合将多个 core TOML 集中到 `filelist/` 而 RTL 保持原目录。                      |
 
-同一个 core 或文件被多处引用时，只在第一次出现的位置展开/输出；依赖环、重复 `core_id`、缺失文件和路径逃出 Git root 都会报错。
+## 去重与同名告警
+
+- core 按 `core_id` 去重，同一个 core 只递归展开一次。
+- 文件按解析后的真实绝对路径去重，同一文件只在首次出现的位置输出。
+- `+incdir+`、`+define+`、`-v` 按 directive 与内容去重。
+- 不同路径但 basename 相同的文件不会去重，都会输出；工具在 `stderr` 给出一次 `W_FILE_NAME_CONFLICT` 告警，列出两条冲突路径。
+
+依赖环、重复 `core_id`、缺失文件和路径逃出 Git root 都会报错。
 
 ## Flist 最前段
 
