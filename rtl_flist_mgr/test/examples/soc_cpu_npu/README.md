@@ -23,7 +23,7 @@ soc_cpu_npu/
     └── npu/{npu.toml,npu_subsys.sv}
 ```
 
-本例将 CPU 的 core TOML 与 SRAM legacy `.f` 集中于 `import/cpu/filelist/`；`sram_sim_model.f` 使用 `/path/to/cpu/lsu/model/...` 绝对路径模板。实际项目应替换为已部署模型的真实绝对路径；回归测试会将模板替换为临时 workspace 的真实绝对路径。`soc.toml` 与 `import/npu/npu.toml` 保持在原目录，用于对比两种组织方式。
+本例将 CPU 的 core TOML 与 SRAM legacy `.f` 集中于 `import/cpu/filelist/`；`sram_sim_model.f` 使用 `${SRAM_PATH}`，通过 `--var SRAM_PATH=<模型目录绝对路径>` 传入。这样示例不会包含无效的 `/path/to/...` 占位路径。实际项目仍推荐在 legacy `.f` 中直接维护已部署模型的真实绝对路径；变量方式仅用于模型目录因环境而异的情况。`soc.toml` 与 `import/npu/npu.toml` 保持在原目录，用于对比两种组织方式。
 
 ## 三种模式
 
@@ -40,7 +40,7 @@ soc_cpu_npu/
 工具直接按 workspace 与 `import/*/` 扫描。可在本目录执行：
 
 ```bash
-python -B ../../../src/rtl_flist_mgr.py soc.toml -m sim   -o out/soc_sim.f
+python -B ../../../src/rtl_flist_mgr.py soc.toml -m sim   --var SRAM_PATH=<模型目录绝对路径> -o out/soc_sim.f
 python -B ../../../src/rtl_flist_mgr.py soc.toml -m synth -o out/soc_synth.f
 python -B ../../../src/rtl_flist_mgr.py soc.toml -m lint  -o out/soc_lint.f
 ```

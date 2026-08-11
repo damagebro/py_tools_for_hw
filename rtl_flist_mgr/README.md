@@ -34,7 +34,14 @@ python -B src/rtl_flist_mgr.py --help
 
 生成 flist 时，`-w <workspace>` 默认当前目录。`--list-core` 未传 `-w` 时会从当前目录向上寻找 workspace root：优先最近含 `.rtl_flist/` 的目录，其次最近含 `import/` 的目录；两者均不存在时，以当前目录为 root。每次 `--list-core` 都先打印 `root_dir: <path> (<source>)`，便于确认本次推断结果。默认查询仅列 root 本体 core，排除 `import/`。
 
-## Core 索引缓存
+## 常用信息
+
+workspace 命令会在 root 下维护 `.rtl_flist/`。这是工具生成的本地状态目录，应加入 `.gitignore`，不需要人工编辑或提交。
+
+| file                            | purpose                                                                                                         |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `.rtl_flist/core_index.toml`    | core 索引缓存，记录 `core_id`、corefile 路径、Git root 与格式；首次扫描或 `--rescan` 时更新。                  |
+| `.rtl_flist/core_tree.txt`      | 最近一次生成 flist 的已展开 core 依赖树，便于人工核对实际依赖关系；每次成功生成 `.f` 时覆盖。                  |
 
 workspace 命令首次执行时扫描 root 与 `import/*/`，将 `core_id`、corefile 路径、Git root 和格式写入 `.rtl_flist/core_index.toml`。之后 `--list-core` 直接读取该索引，不再递归扫描 workspace；生成 `.f` 也按索引定位并解析已登记 corefile。输出中的 `core_index: ... (scan|cache|rescan)` 说明本次来源。
 
@@ -149,7 +156,7 @@ cpu/
 
 ## 固定示例与回归
 
-`test/examples/soc_cpu_npu/` 提供 `soc -> cpu/npu` 的完整小型 workspace：CPU 的 core TOML、legacy `.f` 都集中到 `import/cpu/filelist/`，同时覆盖依赖顺序、file/fileset/core-ID 条件、用户维护 stub 与仿真模型。LSU 中的 SRAM 仿真模型由 `legacy_f` 以 `/path/to/cpu/lsu/model/...` 绝对路径模板引入，DW 仿真模型则作为独立 core 依赖引入。
+`test/examples/soc_cpu_npu/` 提供 `soc -> cpu/npu` 的完整小型 workspace：CPU 的 core TOML、legacy `.f` 都集中到 `import/cpu/filelist/`，同时覆盖依赖顺序、file/fileset/core-ID 条件、用户维护 stub 与仿真模型。为保证示例 checkout 可直接复用，LSU 的 SRAM 仿真模型由 `legacy_f` 使用 `${SRAM_PATH}` 引入；DW 仿真模型则作为独立 core 依赖引入。实际项目仍推荐将已部署模型写为真实绝对路径。
 
 ![soc_cpu_npu architecture](test/examples/soc_cpu_npu/assets/soc_cpu_npu_arch.png)
 
@@ -159,4 +166,4 @@ python -B test/test_rtl_flist_mgr.py
 
 ## 使用示例
 
-`rtl_flist_mgr\test\examples\soc_cpu_npu\README.md`
+[固定示例 README](test/examples/soc_cpu_npu/README.md)
