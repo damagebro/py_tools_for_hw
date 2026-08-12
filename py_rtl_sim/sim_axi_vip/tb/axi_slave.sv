@@ -8,8 +8,8 @@ module axi_slave #(
     parameter string CFG_FILE_DEFAULT = "../axi_vip.cfg"
 )
 (
-    input wire clk,
-    input wire rst_n,
+    input logic clk,
+    input logic rst_n,
     axi_interface.slave s_axi
 );
 
@@ -20,11 +20,28 @@ typedef struct packed {
     logic [1:0]         resp;
 } b_item_t;
 
+typedef struct packed {
+    logic [AXI_IDW-1:0] id;
+    logic [AXI_AW-1:0]  addr;
+} aw_item_t;
+
+typedef struct packed {
+    logic [AXI_DW-1:0] data;
+    logic [AXI_SW-1:0] strb;
+    logic              last;
+} w_item_t;
+
+typedef struct packed {
+    logic [AXI_IDW-1:0] id;
+    logic [AXI_AW-1:0]  addr;
+} ar_item_t;
+
 string cfg_file;
 string cfg_prefix;
 string data_mode;
 string data_file;
 string awready_mode;
+string perf_mode;
 bit enable;
 longint unsigned mem_size;
 longint unsigned data_value;
@@ -33,6 +50,9 @@ int awready_gap_min;
 int awready_gap_max;
 byte unsigned mem[];
 b_item_t b_queue[$];
+aw_item_t aw_queue[$];
+w_item_t w_queue[$];
+ar_item_t ar_queue[$];
 
 initial begin
     if (!$value$plusargs("AXI_CFG=%s", cfg_file))
@@ -74,6 +94,7 @@ task automatic load_cfg();
         cfg_key(cfg_prefix, "axi_awready_mode"),
         cfg_get_string_default(cfg_file, cfg_key(cfg_prefix, "awready_mode"), "continuous")
     );
+    perf_mode = cfg_get_string_default(cfg_file, cfg_key(cfg_prefix, "axi_perf_mode"), "basic");
     awready_gap_min = cfg_get_int(
         cfg_file,
         cfg_key(cfg_prefix, "axi_awready_gap_min"),
@@ -89,6 +110,7 @@ endtask
 task automatic init_mem();
     int fd;
     int read_size;
+    int byte_value;
 
     mem = new[int'(mem_size)];
     foreach (mem[idx]) begin
@@ -103,7 +125,14 @@ task automatic init_mem();
         if (fd == 0) begin
             $display("[AXI_S%0d] warning: cannot open data_file=%s", SLAVE_ID, data_file);
         end else begin
-            read_size = $fread(mem, fd);
+            read_size = 0;
+            foreach (mem[idx]) begin
+                byte_value = $fgetc(fd);
+                if (byte_value < 0)
+                    break;
+                mem[idx] = byte_value[7:0];
+                read_size = read_size + 1;
+            end
             $fclose(fd);
             $display("[AXI_S%0d] loaded %0d bytes from %s", SLAVE_ID, read_size, data_file);
         end
@@ -178,6 +207,55 @@ task automatic write_accept_thread();
     end
 endtask
 
+task automatic write_accept_fullperf_thread();
+    aw_item_t aw_item;
+    w_item_t w_item;
+    b_item_t b_item;
+    int rsp_index;
+    int max_index;
+
+    s_axi.awready <= enable;
+    s_axi.wready  <= enable;
+    forever begin
+        @(posedge clk);
+        if (enable && s_axi.awvalid && s_axi.awready) begin
+            aw_item.id = s_axi.awid;
+            aw_item.addr = s_axi.awaddr;
+            aw_queue.push_back(aw_item);
+        end
+        if (enable && s_axi.wvalid && s_axi.wready) begin
+            w_item.data = s_axi.wdata;
+            w_item.strb = s_axi.wstrb;
+            w_item.last = s_axi.wlast;
+            w_queue.push_back(w_item);
+        end
+        if ((aw_queue.size() != 0) && (w_queue.size() != 0)) begin
+            aw_item = aw_queue.pop_front();
+            w_item = w_queue.pop_front();
+            write_mem(aw_item.addr, w_item.data, w_item.strb);
+            if (w_item.last)
+                push_b(aw_item.id, 2'b00);
+        end
+        if (s_axi.bvalid && s_axi.bready)
+            s_axi.bvalid <= 1'b0;
+        if ((!s_axi.bvalid || s_axi.bready) && (b_queue.size() != 0)) begin
+            if (reorder_depth <= 0) begin
+                rsp_index = 0;
+            end else begin
+                max_index = b_queue.size() - 1;
+                if (max_index >= reorder_depth)
+                    max_index = reorder_depth - 1;
+                rsp_index = $urandom_range(max_index, 0);
+            end
+            b_item = b_queue[rsp_index];
+            b_queue.delete(rsp_index);
+            s_axi.bid    <= b_item.id;
+            s_axi.bresp  <= b_item.resp;
+            s_axi.bvalid <= 1'b1;
+        end
+    end
+endtask
+
 task automatic b_response_thread();
     int rsp_index;
     int max_index;
@@ -222,6 +300,32 @@ task automatic read_thread();
     end
 endtask
 
+task automatic read_fullperf_thread();
+    ar_item_t ar_item;
+
+    s_axi.arready <= enable;
+    forever begin
+        @(posedge clk);
+        if (enable && s_axi.arvalid && s_axi.arready) begin
+            ar_item.id = s_axi.arid;
+            ar_item.addr = s_axi.araddr;
+            ar_queue.push_back(ar_item);
+        end
+        if (s_axi.rvalid && s_axi.rready) begin
+            s_axi.rvalid <= 1'b0;
+            s_axi.rlast  <= 1'b0;
+        end
+        if ((!s_axi.rvalid || s_axi.rready) && (ar_queue.size() != 0)) begin
+            ar_item = ar_queue.pop_front();
+            s_axi.rid    <= ar_item.id;
+            s_axi.rdata  <= read_mem(ar_item.addr);
+            s_axi.rresp  <= 2'b00;
+            s_axi.rlast  <= 1'b1;
+            s_axi.rvalid <= 1'b1;
+        end
+    end
+endtask
+
 initial begin
     reset_bus();
     @(posedge rst_n);
@@ -232,11 +336,18 @@ initial begin
         $display("[AXI_S%0d] disabled", SLAVE_ID);
     else
         $display("[AXI_S%0d] enabled mem_size=0x%0h reorder_depth=%0d", SLAVE_ID, mem_size, reorder_depth);
-    fork
-        write_accept_thread();
-        b_response_thread();
-        read_thread();
-    join_none
+    if (perf_mode == "full") begin
+        fork
+            write_accept_fullperf_thread();
+            read_fullperf_thread();
+        join_none
+    end else begin
+        fork
+            write_accept_thread();
+            b_response_thread();
+            read_thread();
+        join_none
+    end
 end
 
 endmodule

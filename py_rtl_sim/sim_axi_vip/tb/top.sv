@@ -7,11 +7,10 @@ module top();
 localparam int AXI_AW = 32;
 localparam int AXI_DW = 32;
 localparam int AXI_IDW = 4;
-localparam int MAX_AXI_MASTER_NUM = 8;
 
-reg clk;
-reg rst_n;
-logic [MAX_AXI_MASTER_NUM-1:0] master_done;
+logic clk;
+logic rst_n;
+logic master_done;
 string cfg_file;
 int timeout_cycle;
 
@@ -19,13 +18,7 @@ axi_interface #(
     .AXI_AW  (AXI_AW),
     .AXI_DW  (AXI_DW),
     .AXI_IDW (AXI_IDW)
-) master_axi_bus [MAX_AXI_MASTER_NUM]();
-
-axi_interface #(
-    .AXI_AW  (AXI_AW),
-    .AXI_DW  (AXI_DW),
-    .AXI_IDW (AXI_IDW)
-) slave_axi_bus();
+) axi_bus();
 
 initial begin
     clk = 1'b0;
@@ -46,33 +39,16 @@ initial begin
     $display("[TOP] AXI_CFG=%s timeout_cycle=%0d", cfg_file, timeout_cycle);
 end
 
-genvar gen_idx;
-generate
-    for (gen_idx = 0; gen_idx < MAX_AXI_MASTER_NUM; gen_idx++) begin : gen_axi_master
-        axi_master #(
-            .MASTER_ID (gen_idx),
-            .AXI_AW   (AXI_AW),
-            .AXI_DW   (AXI_DW),
-            .AXI_IDW  (AXI_IDW)
-        ) u_axi_master (
-            .clk    (clk),
-            .rst_n  (rst_n),
-            .done   (master_done[gen_idx]),
-            .m_axi  (master_axi_bus[gen_idx])
-        );
-    end
-endgenerate
-
-axi_arbiter #(
-    .MASTER_NUM (MAX_AXI_MASTER_NUM),
+axi_master #(
+    .MASTER_ID (0),
     .AXI_AW     (AXI_AW),
     .AXI_DW     (AXI_DW),
     .AXI_IDW    (AXI_IDW)
-) u_axi_arbiter (
+) u_axi_master (
     .clk   (clk),
     .rst_n (rst_n),
-    .s_axi (master_axi_bus),
-    .m_axi (slave_axi_bus)
+    .done  (master_done),
+    .m_axi (axi_bus)
 );
 
 axi_slave #(
@@ -83,14 +59,14 @@ axi_slave #(
 ) u_axi_slave (
     .clk   (clk),
     .rst_n (rst_n),
-    .s_axi (slave_axi_bus)
+    .s_axi (axi_bus)
 );
 
 initial begin
     wait (rst_n == 1'b1);
     fork
         begin
-            wait (&master_done);
+            wait (master_done);
             repeat (20)
                 @(posedge clk);
             $display("[TOP] AXI VIP PASS");
@@ -111,6 +87,13 @@ initial begin
     $fsdbDumpvars(0, top);
     $fsdbDumpvars(top, "+all");
     $fsdbDumpon();
+end
+`endif
+
+`ifdef DUMP_FST
+initial begin
+    $dumpfile("run.fst");
+    $dumpvars(0, top);
 end
 `endif
 

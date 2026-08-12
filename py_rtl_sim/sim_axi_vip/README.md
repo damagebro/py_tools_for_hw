@@ -1,6 +1,6 @@
 # sim_axi_vip
 
-`sim_axi_vip` 基于 `gen_tb_demo` 目录结构构建。环境支持 `N 个 axi_master -> axi_arbiter -> 1 个 axi_slave`，所有 master 访问同一份 slave memory，不再生成 N 组彼此独立的 master/slave 一对一连接。
+`sim_axi_vip` 基于 `gen_tb_demo` 目录结构构建，提供一组直连的 AXI master/slave 测试环境。默认先连续写入全部数据，再连续读回并逐 beat 比较。
 
 ## 目录文件
 
@@ -8,13 +8,12 @@
 | --------------------- | ----------------------------------------- |
 | `ENV.sh`              | 仿真环境变量和 `SIM_DIR` 初始化脚本                   |
 | `Makefile`            | VCS/Xrun 常用仿真命令入口                         |
-| `axi_vip.cfg`         | 多 master 和共享 slave 的运行配置                  |
+| `axi_vip.cfg`         | 单组 master/slave 的运行配置                       |
 | `rtl.f`               | DUT RTL filelist，默认为空                     |
 | `testbench.f`         | AXI VIP testbench filelist                |
 | `tb/axi_interface.sv` | AXI interface 和 master/slave modport      |
 | `tb/axi_master.sv`    | 可配置 AXI master 激励                         |
-| `tb/axi_arbiter.sv`   | AW/W/B、AR/R 通道轮询仲裁和 response 路由           |
-| `tb/axi_slave.sv`     | 单个共享 AXI slave memory                     |
+| `tb/axi_slave.sv`     | AXI slave memory                              |
 | `tb/top.sv`           | 顶层时钟、复位和 VIP 连接                           |
 
 ## 常用命令
@@ -38,23 +37,23 @@ make run AXI_CFG=../my_axi_vip.cfg
 
 | 配置项             | 说明                                        |
 | --------------- | ----------------------------------------- |
-| `master_num`    | 默认启用的 master 数量                           |
 | `timeout_cycle` | top 等待全部 master done 的周期数                 |
 
-master 使用 `mN.` 前缀，`N` 从 0 开始；共享 slave 只使用 `s0.` 前缀。
+master 使用 `m0.` 前缀，slave 使用 `s0.` 前缀。
 
 master 配置：
 
 | 配置项                           | 说明                                        |
 | ----------------------------- | ----------------------------------------- |
-| `mN.enable`                   | 是否启用该 master                              |
-| `mN.base_addr`                | 写事务起始地址                                   |
-| `mN.byte_size`                | 写入数据总 byte 数                              |
-| `mN.data_mode`                | `addr`/`data=addr`、`file` 或常量模式           |
-| `mN.data_value`               | 常量数据模式使用的默认数据                             |
-| `mN.data_file`                | `data_mode=file` 时读取的二进制文件                |
-| `mN.axi_awvalid_mode`         | `continuous` 或 `random`                   |
-| `mN.axi_awvalid_gap_min/max`  | `random` 模式下 AWVALID 间隔范围                 |
+| `m0.enable`                   | 是否启用 master                              |
+| `m0.base_addr`                | 写事务起始地址                                   |
+| `m0.byte_size`                | 写入并读回的数据总 byte 数                         |
+| `m0.data_mode`                | `addr`/`data=addr`、`file` 或常量模式           |
+| `m0.data_value`               | 常量数据模式使用的默认数据                             |
+| `m0.data_file`                | `data_mode=file` 时读取的二进制文件                |
+| `m0.axi_perf_mode`            | `full` 连续传输；`basic` 逐笔传输                  |
+| `m0.axi_awvalid_mode`         | basic 模式下为 `continuous` 或 `random`         |
+| `m0.axi_awvalid_gap_min/max`  | basic random 模式下 AWVALID 间隔范围             |
 
 共享 slave 配置：
 
@@ -65,22 +64,10 @@ master 配置：
 | `s0.data_mode`                | `addr`/`data=addr`、`file` 或常量模式           |
 | `s0.data_value`               | 常量初始化模式使用的默认数据                            |
 | `s0.data_file`                | `data_mode=file` 时初始化 memory 的文件          |
+| `s0.axi_perf_mode`            | `full` 连续响应；`basic` 逐笔响应                  |
 | `s0.axi_reorder_depth`        | B response 乱序窗口；`0` 表示不乱序                 |
 | `s0.axi_awready_mode`         | `continuous` 或 `random`                   |
 | `s0.axi_awready_gap_min/max`  | `random` 模式下 AWREADY 间隔范围                 |
-
-## 多 Master 连接
-
-设置 `master_num=N` 并增加 `m0` 到 `mN-1` 的配置后，所有已启用 master 会经 `axi_arbiter` 访问同一个 `s0`。仲裁器对 AW 和 AR 使用轮询选择；AW 被接受后会锁定对应 master，直到 WLAST 握手完成，B response 再根据该 master 的固定 AXI ID 路由返回。`top.sv` 默认预留 `MAX_AXI_MASTER_NUM=8`，且该值不得超过 `2 ** AXI_IDW`。
-
-例如启用两个 master：
-
-```ini
-master_num=2
-m0.base_addr=0x00001000
-m1.base_addr=0x00002000
-s0.mem_size=0x00004000
-```
 
 ## 其他命令
 

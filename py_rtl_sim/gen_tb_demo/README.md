@@ -16,6 +16,6 @@ python3 gen_tb.py -o build/sim -top top_module -f '$PROJ_RTL/rtl.f' -e PROJ_RTL=
 | `-top/-t/--top_module` | 在`tb/top.sv`中例化的DUT top module                       |
 | `-f/--filelist`        | 写入`rtl.f`的项目filelist                                 |
 | `-e/--sim_env`         | 写入`ENV.sh`的环境变量，格式为`NAME=VALUE`，可重复指定    |
-| `-s/--env-shell`       | `ENV.sh`语法风格，可选`sh`或`csh`，默认`sh`               |
+| `-s/--env-shell`       | 环境脚本类型，可选`sh`或`csh`，默认生成`ENV.sh`            |
 
-生成后的环境只依赖`SIM_DIR`和通过`-e`写入的环境变量；默认`rtl.f`不额外引用任何RTL。生成目录内会同步生成`README.md`，说明`make com/run/verdi/cdns_com/sim`等常用命令。
+生成后的环境会同时提供`ENV.sh`和`ENV.csh`，只依赖`SIM_DIR`和通过`-e`写入的环境变量；默认`rtl.f`不额外引用任何RTL。生成目录内会同步生成`README.md`，说明`make com/run/verdi/cdns_com/sim/vlt`等常用命令。

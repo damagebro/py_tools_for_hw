@@ -62,6 +62,7 @@ endtask
 
 task automatic load_file_data();
     int fd;
+    int byte_value;
 
     file_size = 0;
     if ((data_mode == "txt") || (data_mode == "text")) begin
@@ -76,7 +77,13 @@ task automatic load_file_data();
         $display("[AHB_M%0d] warning: cannot open data_file=%s", MASTER_ID, data_file);
         return;
     end
-    file_size = $fread(file_data, fd);
+    for (int idx = 0; idx < int'(byte_size); idx++) begin
+        byte_value = $fgetc(fd);
+        if (byte_value < 0)
+            break;
+        file_data[idx] = byte_value[7:0];
+        file_size = file_size + 1;
+    end
     $fclose(fd);
     $display("[AHB_M%0d] loaded %0d bytes from %s", MASTER_ID, file_size, data_file);
 endtask
