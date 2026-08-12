@@ -330,7 +330,7 @@ def generate_tb(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Generate a standalone memory-tool sim testbench sandbox."
+        description="Generate a standalone RTL simulation testbench environment."
     )
     parser.add_argument(
         "-o",
