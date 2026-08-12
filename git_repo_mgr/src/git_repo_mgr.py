@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
+from urllib.parse import unquote, urlsplit
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -102,12 +103,37 @@ def git_success(args: list[str], cwd: Path) -> bool:
 
 def normalize_repository(repository: str) -> str:
     value = repository.strip().rstrip("/\\")
-    if value.endswith(".git"):
-        value = value[:-4]
+    parsed = urlsplit(value)
+    if parsed.scheme == "file":
+        file_path = unquote(parsed.path)
+        if re.fullmatch(r"/[A-Za-z]:/.*", file_path):
+            file_path = file_path[1:]
+        path = Path(file_path)
+        if path.is_absolute():
+            return f"local:{path.resolve()}".casefold()
+
+    if parsed.scheme in {"ssh", "http", "https", "git"} and parsed.hostname:
+        remote_path = parsed.path.strip("/")
+        if remote_path.endswith(".git"):
+            remote_path = remote_path[:-4]
+        return f"remote:{parsed.hostname}/{remote_path}".casefold()
+
     path = Path(value)
     if path.is_absolute():
-        return str(path.resolve()).casefold()
-    return value
+        return f"local:{path.resolve()}".casefold()
+
+    scp_style = re.fullmatch(r"(?:[^@/\s]+@)?(?P<host>[^:/\s]+):(?P<path>.+)", value)
+    if scp_style is not None:
+        host = scp_style.group("host").casefold()
+        remote_path = scp_style.group("path").strip("/")
+        if remote_path.endswith(".git"):
+            remote_path = remote_path[:-4]
+        return f"remote:{host}/{remote_path}".casefold()
+
+    if value.endswith(".git"):
+        value = value[:-4]
+
+    return f"repository:{value}".casefold()
 
 
 def is_full_repository(repository: str) -> bool:

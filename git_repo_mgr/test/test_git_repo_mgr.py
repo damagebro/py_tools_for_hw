@@ -139,6 +139,32 @@ class GitRepoMgrTest(unittest.TestCase):
         self.assertEqual(len(snapshot["repository"]), 6)
         self.assertTrue(all(len(item["commit"]) == 40 for item in snapshot["repository"]))
 
+    def test_normalizes_ssh_and_http_repository_urls(self) -> None:
+        expected = "remote:git.example.com/dmg/common_ip"
+        repositories = (
+            "git@git.example.com:dmg/common_ip.git",
+            "ssh://git@git.example.com/dmg/common_ip.git",
+            "https://git.example.com/dmg/common_ip.git",
+            "http://git.example.com/dmg/common_ip/",
+        )
+
+        self.assertEqual({mgr.normalize_repository(repository) for repository in repositories}, {expected})
+        self.assertNotEqual(
+            mgr.normalize_repository("https://mirror.example.com/dmg/common_ip.git"),
+            expected,
+        )
+
+    def test_normalizes_file_url_and_absolute_path(self) -> None:
+        common = self.create_repo("common_ip")
+        top = self.prepare_top(self.dependency(common.as_uri()) + self.dependency(common))
+
+        self.assertEqual(mgr.normalize_repository(common.as_uri()), mgr.normalize_repository(str(common)))
+
+        code, stdout, stderr = self.invoke(["sync", "--top", str(top)])
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertIn("synced 1 imported repository(s)", stdout)
+        self.assertEqual(len(list((top / "import").iterdir())), 1)
+
     def test_reports_ref_conflict_with_dependency_paths(self) -> None:
         common = self.create_repo("common_ip")
         self.git(["tag", "v1.0"], common)

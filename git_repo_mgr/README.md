@@ -68,6 +68,17 @@ remote 支持 SSH 和 HTTPS。仅定义一个 remote 时，依赖可省略 `remo
 
 `ref` 支持 branch、tag 与 commit ID。工具使用实际解析到的 commit 生成集成快照。
 
+工具会自动归一同一 Git host 上的 SSH、`ssh://`、HTTP 与 HTTPS URL：忽略协议、SSH 用户名、端口、`.git` 和尾部 `/`，按 `host/group/repository` 去重。例如下列 URL 都只会 checkout 一次：
+
+```text
+git@git.example.com:dmg/common_ip.git
+ssh://git@git.example.com/dmg/common_ip.git
+https://git.example.com/dmg/common_ip.git
+http://git.example.com/dmg/common_ip/
+```
+
+不同 host 不会自动合并，即使仓库路径相同也会视为不同 repository。对于本地路径和 `file://` URL，工具按解析后的真实绝对路径去重。
+
 ## Workspace 与冲突
 
 真实 checkout 仅位于 `top/import/`：
@@ -84,7 +95,7 @@ top/
 └── .git_repo/
 ```
 
-同一 repository URL 只 checkout 一次；后续依赖关系在 tree 中标记为 `[shared]`。同一 URL 请求不同 `ref`、或递归依赖成环时，同步直接失败并显示完整依赖路径。
+同一归一化后的 repository 只 checkout 一次；后续依赖关系在 tree 中标记为 `[shared]`。同一 repository 请求不同 `ref`、或递归依赖成环时，同步直接失败并显示完整依赖路径。
 
 默认 checkout 名称为仓库 basename，例如 `common_ip.git` 对应 `import/common_ip/`。不同 URL 出现相同 basename 时，由集成者在 top 的 `git_deps.toml` 显式命名：
 
