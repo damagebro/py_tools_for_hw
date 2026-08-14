@@ -90,4 +90,4 @@ vlt_wave: vlt_gtk_wave
 
 vlt_gtk_wave:
 	test -f $(VLT_FST)
-	gtkwave $(VLT_FST) > $(TEMP_DIR)gtkwave.log 2>&1 &
+	gtkwave $(VLT_FST) -a $(SIM_DIR)/apb_vip.gtkw > $(TEMP_DIR)gtkwave.log 2>&1 &

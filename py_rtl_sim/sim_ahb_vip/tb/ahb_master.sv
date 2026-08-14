@@ -6,9 +6,9 @@ module ahb_master #(
     parameter int AHB_DW = 32,
     parameter string CFG_FILE_DEFAULT = "../ahb_vip.cfg"
 )(
-    input  wire clk,
-    input  wire rst_n,
-    output reg  done,
+    input  logic clk,
+    input  logic rst_n,
+    output logic done,
     ahb_interface.master m_ahb
 );
 
@@ -25,6 +25,7 @@ string rw_mode;
 string data_mode;
 string data_file;
 bit enable;
+bit performance_mode;
 longint unsigned base_addr;
 longint unsigned byte_size;
 longint unsigned data_value;
@@ -32,6 +33,7 @@ longint unsigned hsize_cfg;
 byte unsigned file_data[];
 txt_item_t txt_items[$];
 int file_size;
+int read_error_cnt;
 
 initial begin
     if (!$value$plusargs("AHB_CFG=%s", cfg_file))
@@ -51,6 +53,7 @@ endtask
 
 task automatic load_cfg();
     enable = cfg_get_bit(cfg_file, {cfg_prefix, "enable"}, 1'b1);
+    performance_mode = cfg_get_bit(cfg_file, {cfg_prefix, "performance_mode"}, 1'b0);
     base_addr = cfg_get_uint(cfg_file, {cfg_prefix, "base_addr"}, 32'h1000);
     byte_size = cfg_get_uint(cfg_file, {cfg_prefix, "byte_size"}, AHB_SW);
     rw_mode = cfg_get_string_default(cfg_file, {cfg_prefix, "rw_mode"}, "write");
@@ -173,7 +176,9 @@ endfunction
 task automatic ahb_transfer(
     input bit write_transfer,
     input longint unsigned addr,
-    input logic [AHB_DW-1:0] write_data
+    input logic [AHB_DW-1:0] write_data,
+    input logic [AHB_DW-1:0] expected_data,
+    input bit continue_transfer = 1'b0
 );
     m_ahb.haddr  <= AHB_AW'(addr);
     m_ahb.htrans <= 2'b10;
@@ -184,15 +189,21 @@ task automatic ahb_transfer(
     do @(posedge clk); while (!m_ahb.hready);
     if (m_ahb.hresp != 2'b00)
         $display("[AHB_M%0d] transfer error addr=0x%0h hresp=%0h", MASTER_ID, addr, m_ahb.hresp);
-    if (!write_transfer)
-        $display("[AHB_M%0d] read addr=0x%0h data=0x%0h", MASTER_ID, addr, m_ahb.hrdata);
-    m_ahb.htrans <= 2'b00;
-    m_ahb.hwrite <= 1'b0;
-    @(posedge clk);
+    if (!write_transfer && (m_ahb.hrdata !== expected_data)) begin
+        read_error_cnt = read_error_cnt + 1;
+        $display("[AHB_M%0d] read mismatch addr=0x%0h exp=0x%0h act=0x%0h",
+                 MASTER_ID, addr, expected_data, m_ahb.hrdata);
+    end
+    if (!continue_transfer) begin
+        m_ahb.htrans <= 2'b00;
+        m_ahb.hwrite <= 1'b0;
+        @(posedge clk);
+    end
 endtask
 
 initial begin
     done = 1'b0;
+    read_error_cnt = 0;
     reset_bus();
     @(posedge rst_n);
     @(posedge clk);
@@ -204,16 +215,23 @@ initial begin
         load_file_data();
         if ((data_mode == "txt") || (data_mode == "text")) begin
             foreach (txt_items[idx])
-                ahb_transfer(1'b1, txt_items[idx].addr, txt_items[idx].data);
+                ahb_transfer(1'b1, txt_items[idx].addr, txt_items[idx].data, '0,
+                             performance_mode && (idx != txt_items.size() - 1));
+            foreach (txt_items[idx])
+                ahb_transfer(1'b0, txt_items[idx].addr, '0, txt_items[idx].data);
         end else begin
             $display("[AHB_M%0d] start base=0x%0h bytes=0x%0h mode=%s", MASTER_ID, base_addr, byte_size, rw_mode);
-            for (int offset = 0; offset < byte_size; offset += AHB_SW) begin
-                if ((rw_mode == "write") || (rw_mode == "write_read"))
-                    ahb_transfer(1'b1, base_addr + offset, build_data(base_addr + offset, offset));
-                if ((rw_mode == "read") || (rw_mode == "write_read"))
-                    ahb_transfer(1'b0, base_addr + offset, '0);
-            end
+            for (int offset = 0; offset < byte_size; offset += AHB_SW)
+                ahb_transfer(1'b1, base_addr + offset,
+                             build_data(base_addr + offset, offset), '0,
+                             performance_mode && ((offset + AHB_SW) < byte_size));
+            for (int offset = 0; offset < byte_size; offset += AHB_SW)
+                ahb_transfer(1'b0, base_addr + offset, '0,
+                             build_data(base_addr + offset, offset));
         end
+        if (read_error_cnt != 0)
+            $fatal(1, "[AHB_M%0d] read compare failed, error_count=%0d",
+                   MASTER_ID, read_error_cnt);
         done = 1'b1;
         $display("[AHB_M%0d] done", MASTER_ID);
     end

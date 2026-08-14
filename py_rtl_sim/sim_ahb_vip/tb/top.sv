@@ -7,9 +7,10 @@ module top();
 localparam int AHB_AW = 32;
 localparam int AHB_DW = 32;
 
-reg clk;
-reg rst_n;
-reg done;
+logic clk;
+logic rst_n;
+logic done;
+byte unsigned ahb_mem [65536];
 string cfg_file;
 int timeout_cycle;
 
@@ -36,9 +37,26 @@ initial begin
     $display("[TOP] AHB_CFG=%s timeout_cycle=%0d", cfg_file, timeout_cycle);
 end
 
-assign ahb_bus.hrdata = ahb_bus.haddr;
 assign ahb_bus.hready = 1'b1;
 assign ahb_bus.hresp  = 2'b00;
+
+always_comb begin
+    ahb_bus.hrdata = '0;
+    for (int idx = 0; idx < AHB_DW / 8; idx++)
+        ahb_bus.hrdata[idx * 8 +: 8] = ahb_mem[(ahb_bus.haddr + idx) & 16'hffff];
+end
+
+always @(posedge clk) begin
+    int byte_num;
+
+    if (ahb_bus.htrans[1] && ahb_bus.hready && ahb_bus.hwrite) begin
+        byte_num = 1 << ahb_bus.hsize;
+        for (int idx = 0; idx < AHB_DW / 8; idx++) begin
+            if (idx < byte_num)
+                ahb_mem[(ahb_bus.haddr + idx) & 16'hffff] <= ahb_bus.hwdata[idx * 8 +: 8];
+        end
+    end
+end
 
 ahb_master #(
     .MASTER_ID (0),

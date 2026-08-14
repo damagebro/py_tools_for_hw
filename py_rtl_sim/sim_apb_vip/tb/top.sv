@@ -7,9 +7,10 @@ module top();
 localparam int APB_AW = 32;
 localparam int APB_DW = 32;
 
-reg clk;
-reg rst_n;
-reg done;
+logic clk;
+logic rst_n;
+logic done;
+byte unsigned apb_mem [65536];
 string cfg_file;
 int timeout_cycle;
 
@@ -36,9 +37,23 @@ initial begin
     $display("[TOP] APB_CFG=%s timeout_cycle=%0d", cfg_file, timeout_cycle);
 end
 
-assign apb_bus.prdata  = apb_bus.paddr;
 assign apb_bus.pready  = 1'b1;
 assign apb_bus.pslverr = 1'b0;
+
+always_comb begin
+    apb_bus.prdata = '0;
+    for (int idx = 0; idx < APB_DW / 8; idx++)
+        apb_bus.prdata[idx * 8 +: 8] = apb_mem[(apb_bus.paddr + idx) & 16'hffff];
+end
+
+always @(posedge clk) begin
+    if (apb_bus.psel && apb_bus.penable && apb_bus.pready && apb_bus.pwrite) begin
+        for (int idx = 0; idx < APB_DW / 8; idx++) begin
+            if (apb_bus.pstrb[idx])
+                apb_mem[(apb_bus.paddr + idx) & 16'hffff] <= apb_bus.pwdata[idx * 8 +: 8];
+        end
+    end
+end
 
 apb_master #(
     .MASTER_ID (0),

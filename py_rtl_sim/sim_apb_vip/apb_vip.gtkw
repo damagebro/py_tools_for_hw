@@ -1,0 +1,19 @@
+[*]
+[timestart] 0
+@28
+top.clk
+top.rst_n
+@22
+top.apb_bus.paddr[31:0]
+top.apb_bus.pprot[2:0]
+@28
+top.apb_bus.psel
+top.apb_bus.penable
+top.apb_bus.pwrite
+@22
+top.apb_bus.pwdata[31:0]
+top.apb_bus.pstrb[3:0]
+top.apb_bus.prdata[31:0]
+@28
+top.apb_bus.pready
+top.apb_bus.pslverr

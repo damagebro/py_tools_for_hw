@@ -1,0 +1,20 @@
+[*]
+[timestart] 0
+@28
+top.clk
+top.rst_n
+@22
+top.ahb_bus.haddr[31:0]
+top.ahb_bus.htrans[1:0]
+@28
+top.ahb_bus.hwrite
+@22
+top.ahb_bus.hsize[2:0]
+top.ahb_bus.hburst[2:0]
+top.ahb_bus.hprot[3:0]
+top.ahb_bus.hwdata[31:0]
+top.ahb_bus.hrdata[31:0]
+@28
+top.ahb_bus.hready
+@22
+top.ahb_bus.hresp[1:0]
