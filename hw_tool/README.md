@@ -111,7 +111,13 @@ python -B src/hw_tool.py help de
 python -B src/hw_tool.py de rtl_inst path/to/child.sv
 ```
 
-Windows 下可将 `hw_tool/bin` 加入 `PATH`。如果只需要当前命令行窗口生效：
+## 发布方式
+
+`hw_tool` 依赖同一 `py_tools_for_hw` checkout 下的业务工具，因此 Windows 或 Linux 的发布目录都应保留完整仓库，而不是只复制 `hw_tool/`。发布版本推荐固定到 Git tag 或 commit；通过 `hw_tool --version` 可核对实际 tag/commit。
+
+### Windows PATH
+
+Windows 下将 `<py_tools_for_hw>/hw_tool/bin` 加入用户 `PATH`。如果只需要当前命令行窗口生效：
 
 ```bat
 cd /d path\to\py_tools_for_hw
@@ -136,13 +142,52 @@ hw_tool.cmd list
 hw_tool.cmd de csr_tool -i register.md --nested -o out
 ```
 
-Linux 下将 `hw_tool/bin` 加入 `PATH` 后使用：
+### Linux module load
+
+管理员按版本保留完整 Git checkout，例如：
+
+```text
+/tools/hw_tool/
+└── 0.1.0/
+    └── py_tools_for_hw/
+        ├── hw_tool/
+        ├── csr_tool/
+        ├── rtl_flist_mgr/
+        └── ...
+```
+
+可按 Git tag 部署一个固定版本：
 
 ```bash
+git clone --branch v0.1.0 --depth 1 <py_tools_for_hw_git_url> \
+  /tools/hw_tool/0.1.0/py_tools_for_hw
+```
+
+在 modulefile 根目录创建 `/tools/modulefiles/hw_tool/0.1.0`：
+
+```tcl
+#%Module
+module-whatis "Hardware development tool hub 0.1.0"
+
+set root /tools/hw_tool/0.1.0/py_tools_for_hw/hw_tool
+prepend-path PATH $root/bin
+setenv HW_TOOL_HOME $root
+setenv HW_TOOL_VERSION 0.1.0
+```
+
+系统管理员可将 `/tools/modulefiles` 加入全局 `MODULEPATH`；用户也可临时执行：
+
+```bash
+module use /tools/modulefiles
+module load hw_tool/0.1.0
+hw_tool --version
 hw_tool list
 hw_tool help de
 hw_tool de gen_tb -o sim -top dut_top
+module unload hw_tool/0.1.0
 ```
+
+该 Tcl modulefile 同时兼容 Environment Modules 与 Lmod；卸载时会自动恢复 `PATH`、`HW_TOOL_HOME` 和 `HW_TOOL_VERSION`。发布机需具备 Python 3、Git 以及各工具要求的 Python 依赖。
 
 ## 命令
 
