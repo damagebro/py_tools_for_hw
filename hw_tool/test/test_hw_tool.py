@@ -32,7 +32,11 @@ class HwToolTest(unittest.TestCase):
         self.assertEqual(command[-4:], ["rtl_dummy", "source.sv", "-m", "stub"])
         self.assertIn("hw_tool_de.py", command[2])
         self.assertIn("hw_tool_de", run.call_args.kwargs["env"]["HW_TOOL_HOME"])
-        self.assertTrue(run.call_args.kwargs["env"]["HW_TOOL_GROUPS_ROOT"].endswith("hw_tool\\groups"))
+        self.assertTrue(
+            run.call_args.kwargs["env"]["HW_TOOL_REPOSITORY_ROOT"].endswith(
+                "hw_tool\\repository"
+            )
+        )
 
     def test_unknown_tool_returns_error(self) -> None:
         self.assertEqual(hw_tool.main(["unknown-tool"]), 2)
@@ -99,11 +103,11 @@ class HwToolTest(unittest.TestCase):
     def test_sync_git_tool_clones_missing_checkout(self) -> None:
         group = ToolSpec(
             name="dv",
-            script="groups/hw_tool_dv/src/hw_tool_dv.py",
+            script="repository/hw_tool_dv/src/hw_tool_dv.py",
             description="DV tools.",
             usage="hw_tool dv <tool> [args]",
             kind="hub",
-            tool_home="groups/hw_tool_dv",
+            tool_home="repository/hw_tool_dv",
             source="git",
             repository="ssh://git@example/hw_tool_dv.git",
             branch="main",
@@ -120,11 +124,11 @@ class HwToolTest(unittest.TestCase):
     def test_sync_git_tool_dry_run_does_not_clone(self) -> None:
         group = ToolSpec(
             name="dv",
-            script="groups/hw_tool_dv/src/hw_tool_dv.py",
+            script="repository/hw_tool_dv/src/hw_tool_dv.py",
             description="DV tools.",
             usage="hw_tool dv <tool> [args]",
             kind="hub",
-            tool_home="groups/hw_tool_dv",
+            tool_home="repository/hw_tool_dv",
             source="git",
             repository="ssh://git@example/hw_tool_dv.git",
             branch="main",
@@ -139,11 +143,11 @@ class HwToolTest(unittest.TestCase):
     def test_sync_git_tool_shallow_clone_uses_depth_one(self) -> None:
         group = ToolSpec(
             name="dv",
-            script="groups/hw_tool_dv/src/hw_tool_dv.py",
+            script="repository/hw_tool_dv/src/hw_tool_dv.py",
             description="DV tools.",
             usage="hw_tool dv <tool> [args]",
             kind="hub",
-            tool_home="groups/hw_tool_dv",
+            tool_home="repository/hw_tool_dv",
             source="git",
             repository="ssh://git@example/hw_tool_dv.git",
             branch="main",
@@ -159,11 +163,11 @@ class HwToolTest(unittest.TestCase):
     def test_sync_git_tool_dry_run_skips_dirty_checkout(self) -> None:
         group = ToolSpec(
             name="dv",
-            script="groups/hw_tool_dv/src/hw_tool_dv.py",
+            script="repository/hw_tool_dv/src/hw_tool_dv.py",
             description="DV tools.",
             usage="hw_tool dv <tool> [args]",
             kind="hub",
-            tool_home="groups/hw_tool_dv",
+            tool_home="repository/hw_tool_dv",
             source="git",
             repository="ssh://git@example/hw_tool_dv.git",
             branch="main",
@@ -181,11 +185,11 @@ class HwToolTest(unittest.TestCase):
     def test_sync_git_tool_updates_clean_checkout(self) -> None:
         group = ToolSpec(
             name="dv",
-            script="groups/hw_tool_dv/src/hw_tool_dv.py",
+            script="repository/hw_tool_dv/src/hw_tool_dv.py",
             description="DV tools.",
             usage="hw_tool dv <tool> [args]",
             kind="hub",
-            tool_home="groups/hw_tool_dv",
+            tool_home="repository/hw_tool_dv",
             source="git",
             repository="ssh://git@example/hw_tool_dv.git",
             branch="main",

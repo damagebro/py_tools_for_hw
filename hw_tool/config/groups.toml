@@ -11,7 +11,7 @@ description = "Digital engineering tools."
 # External group template. Uncomment and fill in the company repository URL.
 # [group.dv]
 # source = "git"
-# path = "groups/hw_tool_dv"
+# path = "repository/hw_tool_dv"
 # entry = "src/hw_tool_dv.py"
 # description = "Design verification tools."
 # doc_url = "https://company.example/hw_tool_dv/README.md"

@@ -22,7 +22,7 @@ hw_tool doc de.csr_tool
 ```toml
 [group.de_tools]
 source = "git"
-path = "groups/py_tools_for_hw/hw_tool"
+path = "repository/py_tools_for_hw/hw_tool"
 entry = "src/hw_tool.py"
 description = "Hardware development tool federation."
 repository = "https://github.com/damagebro/py_tools_for_hw.git"
@@ -83,21 +83,21 @@ hw_tool/
   bin/                  # 公司级 hw_tool 启动器
   src/                  # 公司级 hub
   config/groups.toml    # 小组注册和外部仓库配置
-  groups/               # 外部 group 的本地 checkout，默认不提交
+  repository/           # 业务工具与外部 group 的本地 checkout，默认不提交
+  publish/              # Windows、Linux、VS Code 三种发布入口
+    windows/            # PATH 安装脚本
+    linux/              # modulefile 模板
+    vscode/             # VS Code 扩展源码和 .vsix 打包配置
   hw_tool_de/           # DE 子 hub，仅包含入口、注册表和测试
     bin/
     src/
-csr_tool/               # 保持原业务工具路径
-gen_rtl_dummy/
-gen_rtl_inst/
-py_rtl_sim/
 ```
 
 ## DE 工具来源
 
 `csr_tool`、`rtl_inst`、`rtl_dummy` 和 `gen_tb` 共用 `py_tools_for_hw` Git URL；`mem_tool` 使用 `com` Git URL。`hw_tool de sync --all` 按来源仓库同步，同一仓库只同步一次。
 
-在 `py_tools_for_hw` 源仓库内开发时会优先使用当前工作区，不额外 clone 自身。`hw_tool_de` 独立部署后，父 hub 会传递统一的 `hw_tool/groups/` checkout 根目录；执行 `hw_tool sync --all` 即可拉取各工具来源仓库。
+在 `py_tools_for_hw` 源仓库内开发时会优先使用当前工作区，不额外 clone 自身。`hw_tool_de` 独立部署后，父 hub 会传递统一的 `hw_tool/repository/` checkout 根目录；执行 `hw_tool sync --all` 即可拉取各工具来源仓库。
 
 ## 使用方式
 
@@ -113,7 +113,9 @@ python -B src/hw_tool.py de rtl_inst path/to/child.sv
 
 ## 发布方式
 
-`hw_tool` 依赖同一 `py_tools_for_hw` checkout 下的业务工具，因此 Windows 或 Linux 的发布目录都应保留完整仓库，而不是只复制 `hw_tool/`。发布版本推荐固定到 Git tag 或 commit；通过 `hw_tool --version` 可核对实际 tag/commit。
+`hw_tool` 的发布产物可独立为一个目录：发布脚本将已注册工具源码复制到 `repository/`，运行时不再依赖外层 `py_tools_for_hw/`。源码发布保持跨平台；目标机器需提供兼容的 Python 与工具依赖。发布版本推荐固定到 Git tag 或 commit；通过 `hw_tool --version` 可核对实际 tag/commit。
+
+发布目录总览见 [publish/README.md](publish/README.md)。Windows PATH、Linux module load 与 VS Code 分别由 `publish/windows/`、`publish/linux/`、`publish/vscode/` 维护。
 
 ### Windows PATH
 
@@ -149,18 +151,17 @@ hw_tool.cmd de csr_tool -i register.md --nested -o out
 ```text
 /tools/hw_tool/
 └── 0.1.0/
-    └── py_tools_for_hw/
-        ├── hw_tool/
-        ├── csr_tool/
-        ├── rtl_flist_mgr/
+    └── hw_tool/
+        ├── bin/
+        ├── repository/
         └── ...
 ```
 
 可按 Git tag 部署一个固定版本：
 
 ```bash
-git clone --branch v0.1.0 --depth 1 <py_tools_for_hw_git_url> \
-  /tools/hw_tool/0.1.0/py_tools_for_hw
+python -B build_release.py --version 0.1.0
+cp -a out/hw_tool-0.1.0/hw_tool /tools/hw_tool/0.1.0/
 ```
 
 在 modulefile 根目录创建 `/tools/modulefiles/hw_tool/0.1.0`：
@@ -169,7 +170,7 @@ git clone --branch v0.1.0 --depth 1 <py_tools_for_hw_git_url> \
 #%Module
 module-whatis "Hardware development tool hub 0.1.0"
 
-set root /tools/hw_tool/0.1.0/py_tools_for_hw/hw_tool
+set root /tools/hw_tool/0.1.0/hw_tool
 prepend-path PATH $root/bin
 setenv HW_TOOL_HOME $root
 setenv HW_TOOL_VERSION 0.1.0
@@ -205,7 +206,7 @@ module unload hw_tool/0.1.0
 | `hw_tool sync --all [options]`    | 预览或更新全部已注册的 Git source                  |
 | `hw_tool <group> ...`             | 原样透传参数给指定小组的 `hw_tool_<group>`        |
 
-`--version` 使用 `git describe --tags --always --dirty` 和最新 commit 日期时间（精确到分钟）；当前没有 tag 时显示 commit ID，有本地修改时追加 `-dirty`。`doctor` 中的 `[warn] launcher` 表示当前终端尚未从更新后的 `PATH` 启动，不影响通过 `python -B src/hw_tool.py` 调用。
+`--version` 使用 `git describe --tags --always --dirty` 和最新 commit 日期时间（精确到分钟）；当前没有 tag 时显示 commit ID，有本地修改时追加 `-dirty`。离线发布包不在 Git 工作树内时，改为读取 `release_info.toml` 中的版本和构建时间。`doctor` 中的 `[warn] launcher` 表示当前终端尚未从更新后的 `PATH` 启动，不影响通过 `python -B src/hw_tool.py` 调用。
 
 ## 契约与回归
 
@@ -283,7 +284,7 @@ hw_tool dv run_case smoke
 ```toml
 [group.dv]
 source = "git"
-path = "groups/hw_tool_dv"
+path = "repository/hw_tool_dv"
 entry = "src/hw_tool_dv.py"
 description = "Design verification tools."
 doc_url = "https://company.example/hw_tool_dv/README.md"
@@ -299,7 +300,7 @@ hw_tool dv list
 hw_tool sync --all
 ```
 
-首次同步会 clone 到 `hw_tool/groups/hw_tool_dv/`；后续同步依次执行 `git fetch`、`git checkout <branch>` 与 `git pull --ff-only`。若 checkout 存在未提交修改，`sync` 会拒绝更新，避免覆盖现场改动。外部 checkout 已由 [`.gitignore`](.gitignore) 忽略，不会被提交到公司级 hub 仓库。`hw_tool sync --all` 还会请求每个已就绪 group 同步其内部 Git 工具依赖。
+首次同步会 clone 到 `hw_tool/repository/hw_tool_dv/`；后续同步依次执行 `git fetch`、`git checkout <branch>` 与 `git pull --ff-only`。若 checkout 存在未提交修改，`sync` 会拒绝更新，避免覆盖现场改动。外部 checkout 已由 [`.gitignore`](.gitignore) 忽略，不会被提交到公司级 hub 仓库。`hw_tool sync --all` 还会请求每个已就绪 group 同步其内部 Git 工具依赖。
 
 ## 嵌套规则
 

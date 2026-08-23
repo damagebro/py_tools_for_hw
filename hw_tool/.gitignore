@@ -1,4 +1,8 @@
-groups/*
-!groups/.gitkeep
+repository/*
+!repository/.gitkeep
+# Legacy checkout location retained locally during migration.
+groups/
+publish/out/
+publish/*
 *bin*
 *tmp*

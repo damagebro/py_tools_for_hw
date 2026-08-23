@@ -9,6 +9,7 @@ import sys
 import uuid
 from importlib.util import find_spec
 from pathlib import Path
+import tomllib
 
 from tool_registry import (
     DEFAULT_GROUP,
@@ -29,7 +30,7 @@ TOOL_KIND_SCRIPT = "script"
 TOOL_KIND_HUB = "hub"
 TOOL_SOURCE_GIT = "git"
 DEFAULT_DOC_LINES = 48
-GROUPS_ROOT_ENV = "HW_TOOL_GROUPS_ROOT"
+REPOSITORY_ROOT_ENV = "HW_TOOL_REPOSITORY_ROOT"
 HUB_CHAIN_ENV = "HW_TOOL_HUB_CHAIN"
 FEDERATION_SCHEMA_VERSION = 1
 
@@ -103,9 +104,9 @@ def repository_workspace_path(repository: RepositorySpec) -> Path | None:
 
 
 def repository_checkout_path(repository: RepositorySpec) -> Path:
-    groups_root = os.environ.get(GROUPS_ROOT_ENV)
-    if groups_root:
-        return (Path(groups_root).expanduser().resolve() / repository.name).resolve()
+    repository_root = os.environ.get(REPOSITORY_ROOT_ENV)
+    if repository_root:
+        return (Path(repository_root).expanduser().resolve() / repository.name).resolve()
     return (tool_root() / repository.checkout).resolve()
 
 
@@ -252,10 +253,31 @@ def git_commit_date(path: Path) -> str:
     return f"{timestamp[:10]} {timestamp[11:16]}"
 
 
+def release_version(path: Path) -> tuple[str, str] | None:
+    metadata_path = path / "release_info.toml"
+    try:
+        metadata = tomllib.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    release = metadata.get("release")
+    if not isinstance(release, dict):
+        return None
+    version = release.get("version")
+    built_at = release.get("built_at")
+    if not isinstance(version, str) or not isinstance(built_at, str):
+        return None
+    return version, built_at
+
+
 def print_version() -> None:
+    version = git_version(tool_root())
+    commit_date = git_commit_date(tool_root())
+    if version == "unknown":
+        release = release_version(tool_root())
+        if release is not None:
+            version, commit_date = release
     print(
-        f"{tool_root().name}: {git_version(tool_root())} "
-        f"({git_commit_date(tool_root())})"
+        f"{tool_root().name}: {version} ({commit_date})"
     )
 
 
@@ -665,7 +687,7 @@ def tool_environment(tool: ToolSpec) -> dict[str, str]:
     child_root = child_tool_root(tool)
     if child_root is not None:
         environment["HW_TOOL_HOME"] = str(child_root)
-        environment[GROUPS_ROOT_ENV] = str((tool_root() / "groups").resolve())
+        environment[REPOSITORY_ROOT_ENV] = str((tool_root() / "repository").resolve())
         environment[HUB_CHAIN_ENV] = ":".join((*hub_chain(), hub_identifier()))
     return environment
 

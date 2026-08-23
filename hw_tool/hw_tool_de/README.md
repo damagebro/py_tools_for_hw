@@ -40,7 +40,7 @@ hw_tool de test --all
 
 `rtl_inst`、`rtl_dummy`、`csr_tool`、`gen_tb`、`git_repo_mgr` 和 `rtl_flist_mgr` 共用 `py_tools_for_hw` Git URL 与一个 checkout；`mem_tool` 使用独立的 `com` Git URL。注册表只记录仓库内相对路径，`sync --all` 会按来源仓库去重，同一仓库只同步一次。
 
-当前开发工作区存在时，`hw_tool_de` 优先直接使用它，不会 clone 自身仓库。将 `hw_tool_de` 拆分为独立仓库后，缺少本地工作区时会自动使用 `hw_tool/groups/py_tools_for_hw/` 中由 `sync` 拉取的 checkout。
+当前开发工作区存在时，`hw_tool_de` 优先直接使用它，不会 clone 自身仓库。将 `hw_tool_de` 拆分为独立仓库后，缺少本地工作区时会自动使用 `hw_tool/repository/py_tools_for_hw/` 中由 `sync` 拉取的 checkout。
 
 ## 调用方式
 
@@ -59,7 +59,7 @@ hw_tool de rtl_dummy path/to/source.sv -m port_swap -o dummy.sv
 hw_tool de sync csr_tool
 ```
 
-它会 clone 到 `hw_tool/groups/py_tools_for_hw/`；`mem_tool` 会 clone 到 `hw_tool/groups/com/`。后续可使用 `hw_tool de sync <tool>` 或 `hw_tool sync --all` 更新。
+它会 clone 到 `hw_tool/repository/py_tools_for_hw/`；`mem_tool` 会 clone 到 `hw_tool/repository/com/`。后续可使用 `hw_tool de sync <tool>` 或 `hw_tool sync --all` 更新。
 
 执行同步前可预览动作：
 

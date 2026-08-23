@@ -42,14 +42,15 @@ REPOSITORY_SPECS = (
         name="py_tools_for_hw",
         repository="https://github.com/damagebro/py_tools_for_hw.git",
         branch="main",
-        checkout="../groups/py_tools_for_hw",
+        checkout="../repository/py_tools_for_hw",
         workspace="../..",
     ),
     RepositorySpec(
         name="com",
         repository="https://github.com/damagebro/com.git",
         branch="main",
-        checkout="../groups/com",
+        checkout="../repository/com",
+        workspace="../../../com",
     ),
 )
 
