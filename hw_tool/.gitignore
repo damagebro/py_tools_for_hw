@@ -1,8 +1,17 @@
+# Local repository checkouts created by sync.
 repository/*
 !repository/.gitkeep
+
 # Legacy checkout location retained locally during migration.
 groups/
+
+# Generated Windows/Linux source release directories and archives.
 publish/out/
-publish/*
+publish/vscode/
+
+# Existing local development artifacts.
 *bin*
+!bin/
+!bin/hw_tool
+!bin/hw_tool.cmd
 *tmp*

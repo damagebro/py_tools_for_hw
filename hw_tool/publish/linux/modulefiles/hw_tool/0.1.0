@@ -1,0 +1,7 @@
+#%Module
+module-whatis "Hardware development tool hub 0.1.0"
+
+set root /tools/hw_tool/0.1.0/hw_tool
+prepend-path PATH $root/bin
+setenv HW_TOOL_HOME $root
+setenv HW_TOOL_VERSION 0.1.0

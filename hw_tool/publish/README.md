@@ -15,4 +15,4 @@
 python -B build_release.py --version 0.1.0
 ```
 
-产物位于 `out/hw_tool-0.1.0/hw_tool/` 与 `out/hw_tool-0.1.0.zip`，可整体复制到 Windows 或 Linux。使用 `--no-archive` 可只生成目录。它不内置 Python runtime；目标环境需安装 Python 3.11+，并安装 `csr_tool` 所需的 `jinja2`、`openpyxl`。生成目录中的 `release_info.toml` 保存版本与构建时间，离开 Git 工作树后 `hw_tool --version` 会使用该信息。`repository/` 和 `out/` 都由 Git ignore。VS Code 扩展调用已发布到 PATH 的 `hw_tool`；它只提供编辑器交互，不复制 Python 工具的业务实现。
+产物位于 `out/hw_tool-0.1.0/hw_tool/` 与 `out/hw_tool-0.1.0.zip`，可整体复制到 Windows 或 Linux。使用 `--no-archive` 可只生成目录。它不内置 Python runtime；目标环境需安装 Python 3.11+，并安装 `csr_tool` 所需的 `jinja2`、`openpyxl`。生成目录中的 `release_info.toml` 保存版本与构建时间，离开 Git 工作树后 `hw_tool --version` 会使用该信息。`repository/` 和 `out/` 都由 Git ignore。VS Code 扩展会内置同一份工具源码，只依赖系统 Python，不要求 `hw_tool` 位于 PATH。
