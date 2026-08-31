@@ -12,6 +12,7 @@ if __package__ in {None, ""}:
     from src.reg_gen_rtl import generate_rtl
     from src.reg_gen_tb import generate_tb
     from src.reg_parser import CSRParser
+    from src.reg_template import create_template
 else:
     from .reg_common import CSRValidationError
     from .reg_gen_doc import DocGenerator
@@ -19,11 +20,16 @@ else:
     from .reg_gen_rtl import generate_rtl
     from .reg_gen_tb import generate_tb
     from .reg_parser import CSRParser
+    from .reg_template import create_template
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Generate CSR RTL, testbench, documentation, and firmware headers."
+        description="Generate CSR RTL, testbench, documentation, and firmware headers.",
+        epilog=(
+            "Create an input template: autogen_reg.py template "
+            "[-f {md,xlsx}] [-o OUTPUT] [--base-info]"
+        ),
     )
     parser.add_argument(
         "-i",
@@ -52,6 +58,30 @@ def build_argument_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def build_template_argument_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="autogen_reg.py template",
+        description="Create a CSR register-definition template.",
+    )
+    parser.add_argument(
+        "-f",
+        "--format",
+        choices=("md", "xlsx"),
+        help="Template format; inferred from --output when omitted",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        help="Output file (default: reg_define.md or reg_define.xlsx)",
+    )
+    parser.add_argument(
+        "--base-info",
+        action="store_true",
+        help="Include the optional base_info section or worksheet",
+    )
+    return parser
+
+
 def run(input_path: str, outdir: str, nested: bool) -> list[Path]:
     source = Path(input_path).resolve()
     output = Path(outdir).resolve()
@@ -69,7 +99,24 @@ def run(input_path: str, outdir: str, nested: bool) -> list[Path]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_argument_parser().parse_args(argv)
+    actual_argv = list(sys.argv[1:] if argv is None else argv)
+    if actual_argv and actual_argv[0] == "template":
+        args = build_template_argument_parser().parse_args(actual_argv[1:])
+        template_format = args.format
+        output = args.output or f"reg_define.{template_format or 'md'}"
+        try:
+            generated = create_template(
+                output,
+                template_format,
+                include_base_info=args.base_info,
+            )
+        except (ImportError, OSError, ValueError) as exc:
+            print(f"[ERROR] {exc}", file=sys.stderr)
+            return 1
+        print(f"[OK] Template generated: {generated}")
+        return 0
+
+    args = build_argument_parser().parse_args(actual_argv)
     nested = args.nested or args.mode == "nested"
     try:
         generated = run(args.input, args.outdir, nested)

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import io
 import sys
 import unittest
 import shutil
 import uuid
+from contextlib import redirect_stdout
 from pathlib import Path
 
 
@@ -40,6 +42,15 @@ class GenRtlInstTest(unittest.TestCase):
         self.assertNotIn(".HIDDEN", content)
         self.assertIn(".clk", content)
         self.assertIn("u_sample_sv_inst", content)
+
+    def test_stdout_contains_only_instance_snippet(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(main([str(self.rtl_path), "--stdout"]), 0)
+        content = output.getvalue()
+        self.assertTrue(content.startswith(f"// Source: {self.rtl_path}"))
+        self.assertIn("u_sample_sv_inst", content)
+        self.assertNotIn("generated inst.sv", content)
 
 
 if __name__ == "__main__":

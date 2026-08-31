@@ -48,7 +48,7 @@
     },
     "RTL clocked always": {
         "scope": "systemverilog,verilog",
-        "prefix": "rtl-always",
+        "prefix": "rtl-always_dff_no_rst",
         "description": "Clocked always block.",
         "body": [
             "always @(posedge clk) begin",
@@ -59,7 +59,7 @@
     },
     "RTL DFF async reset": {
         "scope": "systemverilog,verilog",
-        "prefix": "rtl-dff-an",
+        "prefix": "rtl-always_dff",
         "description": "DFF with active-low asynchronous reset.",
         "body": [
             "always @(posedge clk or negedge rst_n) begin",
@@ -72,7 +72,7 @@
     },
     "RTL DFF async reset, with if(xx) begin end": {
         "scope": "systemverilog,verilog",
-        "prefix": "rtl-dff",
+        "prefix": "rtl-always_dff_begin_end",
         "description": "DFF with active-low asynchronous reset.",
         "body": [
             "always @(posedge clk or negedge rst_n) begin",
@@ -87,7 +87,7 @@
     },
     "RTL combinational always": {
         "scope": "systemverilog,verilog",
-        "prefix": "rtl-comb",
+        "prefix": "rtl-always_comb",
         "description": "Combinational always block.",
         "body": [
             "always @* begin",
@@ -130,7 +130,7 @@
     },
     "Valid-ready ports": {
         "scope": "systemverilog,verilog",
-        "prefix": "vld-rdy-port",
+        "prefix": "rtl-vld_rdy",
         "description": "Valid-ready receive and transmit port group.",
         "body": [
             "input  logic [DW-1:0]      i_rx_payload ,",
@@ -144,7 +144,7 @@
     },
     "RAM ports": {
         "scope": "systemverilog,verilog",
-        "prefix": "ram-port",
+        "prefix": "rtl-ram_port",
         "description": "Single-port RAM request and response port group.",
         "body": [
             "parameter AW           = 8,",
@@ -164,22 +164,22 @@
     },
     "CSR ports": {
         "scope": "systemverilog,verilog",
-        "prefix": "csr-port",
+        "prefix": "rtl-csr_port",
         "description": "CSR request and response port group.",
         "body": [
-            "input  wire                         i_rx_csr_req_write   ,",
-            "input  wire [CSR_AW-1:0]            i_rx_csr_req_addr    ,",
-            "input  wire [CSR_DW-1:0]            i_rx_csr_req_wdata   ,",
-            "input  wire [CSR_DW/8-1:0]          i_rx_csr_req_wstrb   ,",
-            "input  wire                         i_rx_csr_req_valid   ,",
-            "output wire                         o_rx_csr_req_ready   ,",
-            "output wire                         o_rx_csr_rsp_rvalid  ,",
-            "output wire [CSR_DW-1:0]            o_rx_csr_rsp_rdata   ,"
+            "input  wire                     i_rx_csr_req_write   ,",
+            "input  wire [CSR_AW-1:0]        i_rx_csr_req_addr    ,",
+            "input  wire [CSR_DW-1:0]        i_rx_csr_req_wdata   ,",
+            "input  wire [CSR_DW/8-1:0]      i_rx_csr_req_wstrb   ,",
+            "input  wire                     i_rx_csr_req_valid   ,",
+            "output wire                     o_rx_csr_req_ready   ,",
+            "output wire                     o_rx_csr_rsp_rvalid  ,",
+            "output wire [CSR_DW-1:0]        o_rx_csr_rsp_rdata   ,"
         ]
     },
     "eBus read ports": {
         "scope": "systemverilog,verilog",
-        "prefix": "ebus-rdport",
+        "prefix": "rtl-ebus_rdport",
         "description": "eBus read request and response port group.",
         "body": [
             "input  wire [UW-1:0]            i_rx_ebus_ra_user    ,",
@@ -195,7 +195,7 @@
     },
     "eBus write ports": {
         "scope": "systemverilog,verilog",
-        "prefix": "ebus-wrport",
+        "prefix": "rtl-ebus_wrport",
         "description": "eBus write request and response port group.",
         "body": [
             "input  wire [UW-1:0]            i_rx_ebus_wa_user    ,",
@@ -211,7 +211,7 @@
     },
     "APB ports": {
         "scope": "systemverilog,verilog",
-        "prefix": "apb-port",
+        "prefix": "rtl-apb_port",
         "description": "APB slave port group without clock and reset.",
         "body": [
             "input  logic [${1:APB_AW}-1:0]  i_apb_paddr   ,",
@@ -227,7 +227,7 @@
     },
     "AXI4 ports": {
         "scope": "systemverilog,verilog",
-        "prefix": "axi4-port",
+        "prefix": "rtl-axi4_port",
         "description": "AXI4 slave port group with all mandatory five-channel signals.",
         "body": [
             "output wire [IW-1:0]            o_tx_axi_awid    ,",

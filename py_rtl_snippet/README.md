@@ -31,7 +31,7 @@ python -B src/py_rtl_snippet.py -o snippets/systemverilog.code-snippets
 "editor.tabCompletion": "on"
 ```
 
-在 SystemVerilog/Verilog 源文件中输入 `rtl-dff-an` 等前缀，从补全列表选择片段。插入后可反复按 Tab，在各个占位符之间跳转并修改内容。
+在 SystemVerilog/Verilog 源文件中输入 `rtl-always_dff` 等前缀，从补全列表选择片段。插入后可反复按 Tab，在各个占位符之间跳转并修改内容。
 
 ## Markdown 格式
 
@@ -51,21 +51,23 @@ assign ${1:o_data} = ${2:i_data};${0}
 
 ## 常用前缀
 
-| 前缀            | 说明                                         |
-| --------------- | -------------------------------------------- |
-| `rtl-module`    | 含参数、对齐端口和代码分区注释的模块头。     |
-| `rtl-always`    | `always @(posedge clk)` 时序逻辑块。          |
-| `rtl-dff-an`   | 低有效异步复位 DFF。                          |
-| `rtl-comb`      | `always @*` 组合逻辑块。                      |
-| `rtl-struct`   | packed struct typedef，类型名使用 `_ts`。     |
-| `rtl-union`    | packed union typedef，类型名使用 `_tu`。      |
-| `rtl-enum`     | enum typedef，类型名使用 `_te`。              |
-| `vld-rdy-port` | Valid-ready 收发端口组。                      |
-| `ram-port`     | 单端口 RAM 请求/响应端口组。                  |
-| `csr-port`     | CSR 请求/响应端口组。                         |
-| `ebus-port`    | eBus 请求/响应端口组。                        |
-| `apb-port`     | APB slave 端口组。                            |
-| `axi4-port`    | AXI4 slave 五通道端口组。                     |
+| 前缀                         | 说明                                         |
+| ---------------------------- | -------------------------------------------- |
+| `rtl-module`                 | 含参数、对齐端口和代码分区注释的模块头。     |
+| `rtl-always_dff_no_rst`      | 无复位的 `always @(posedge clk)` 时序块。    |
+| `rtl-always_dff`             | 低有效异步复位 DFF，单行条件赋值。           |
+| `rtl-always_dff_begin_end`   | 低有效异步复位 DFF，分支带 `begin/end`。     |
+| `rtl-always_comb`            | `always @*` 组合逻辑块。                     |
+| `rtl-struct`                 | packed struct typedef，类型名使用 `_ts`。    |
+| `rtl-union`                  | packed union typedef，类型名使用 `_tu`。     |
+| `rtl-enum`                   | enum typedef，类型名使用 `_te`。             |
+| `rtl-vld_rdy`                | Valid-ready 收发端口组。                      |
+| `rtl-ram_port`               | 单端口 RAM 请求/响应端口组。                  |
+| `rtl-csr_port`               | CSR 请求/响应端口组。                         |
+| `rtl-ebus_rdport`            | eBus 读请求/响应端口组。                      |
+| `rtl-ebus_wrport`            | eBus 写请求/响应端口组。                      |
+| `rtl-apb_port`               | APB slave 端口组。                            |
+| `rtl-axi4_port`              | AXI4 slave 五通道端口组。                     |
 
 ## 命令行工具
 

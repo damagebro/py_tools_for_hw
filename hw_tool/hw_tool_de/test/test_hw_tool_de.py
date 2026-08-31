@@ -27,12 +27,21 @@ class HwToolDeTest(unittest.TestCase):
         self.assertEqual(TOOL_MAP["rtl_inst"].repository_name, "py_tools_for_hw")
         self.assertEqual(TOOL_MAP["rtl_dummy"].repository_name, "py_tools_for_hw")
         self.assertEqual(TOOL_MAP["gen_tb"].repository_name, "py_tools_for_hw")
+        self.assertEqual(TOOL_MAP["md2html"].repository_name, "py_tools_for_hw")
         self.assertEqual(TOOL_MAP["git_repo_mgr"].repository_name, "py_tools_for_hw")
         self.assertEqual(TOOL_MAP["rtl_flist_mgr"].repository_name, "py_tools_for_hw")
         self.assertEqual(TOOL_MAP["mem_tool"].repository_name, "com")
         self.assertEqual(TOOL_MAP["csr_tool"].doctor_packages, ("jinja2", "openpyxl"))
         self.assertFalse(TOOL_MAP["mem_tool"].contract_enabled)
-        for name in ("rtl_inst", "rtl_dummy", "csr_tool", "gen_tb", "git_repo_mgr", "rtl_flist_mgr"):
+        for name in (
+            "rtl_inst",
+            "rtl_dummy",
+            "csr_tool",
+            "gen_tb",
+            "md2html",
+            "git_repo_mgr",
+            "rtl_flist_mgr",
+        ):
             tool = TOOL_MAP[name]
             self.assertTrue(tool.example)
             self.assertTrue(tool.smoke_args)
@@ -53,6 +62,7 @@ class HwToolDeTest(unittest.TestCase):
         self.assertIn("rtl_dummy", completed.stdout)
         self.assertIn("csr_tool", completed.stdout)
         self.assertIn("gen_tb", completed.stdout)
+        self.assertIn("md2html", completed.stdout)
         self.assertIn("git_repo_mgr", completed.stdout)
         self.assertIn("rtl_flist_mgr", completed.stdout)
         self.assertNotIn("missing", completed.stdout)
@@ -79,6 +89,7 @@ class HwToolDeTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("rtl_inst: contract", completed.stdout)
         self.assertIn("gen_tb: contract", completed.stdout)
+        self.assertIn("md2html: contract", completed.stdout)
         self.assertIn("git_repo_mgr: contract", completed.stdout)
         self.assertIn("rtl_flist_mgr: contract", completed.stdout)
         self.assertIn("mem_tool: externally maintained", completed.stdout)
@@ -119,7 +130,10 @@ class HwToolDeTest(unittest.TestCase):
         tools = {tool["name"]: tool for tool in payload["tools"]}
         self.assertIn("mem_tool", tools)
         self.assertEqual(tools["mem_tool"]["status"], "ready")
-        self.assertRegex(tools["mem_tool"]["detail"] or "", r"^[0-9a-f]+(?: dirty)?$")
+        self.assertRegex(
+            tools["mem_tool"]["detail"] or "",
+            r"^(?:workspace )?[0-9a-f]+(?: dirty)?$",
+        )
 
     def test_doc_prints_cross_repository_readme(self) -> None:
         completed = subprocess.run(

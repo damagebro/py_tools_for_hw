@@ -46,6 +46,26 @@ python src/autogen_reg.py --help
 
 ### 2.2 最小示例
 
+新建仅包含 `reg_define` 章节的 Markdown 寄存器定义模板：
+
+```bash
+python src/autogen_reg.py template -o reg_define.md
+```
+
+新建仅包含 `reg_define` sheet，并带 `SW_access` 和 `reg_type` 下拉选项的 Excel 模板：
+
+```bash
+python src/autogen_reg.py template -o reg_define.xlsx
+```
+
+需要同时生成可选的 `base_info` 章节或 sheet 时增加 `--base-info`：
+
+```bash
+python src/autogen_reg.py template --base-info -o reg_define.md
+```
+
+不指定 `-o` 时默认生成 `reg_define.md`；也可以使用 `--format md` 或 `--format xlsx` 显式选择格式。
+
 生成单个模块：
 
 ```bash

@@ -348,8 +348,8 @@ class DocGenerator:
                 f"0x{size:X}",
                 f"Open {sheet_name}",
             ])
-            map_sheet.cell(map_sheet.max_row, 4).hyperlink = f"#'{sheet_name}'!A1"
-            map_sheet.cell(map_sheet.max_row, 4).style = "Hyperlink"
+            map_sheet.cell(row=map_sheet.max_row, column=4).hyperlink = f"#'{sheet_name}'!A1"
+            map_sheet.cell(row=map_sheet.max_row, column=4).style = "Hyperlink"
         self._style_workbook(workbook)
         workbook.save(path)
         return path
@@ -357,6 +357,7 @@ class DocGenerator:
     @staticmethod
     def _style_workbook(workbook: object) -> None:
         from openpyxl.styles import Font, PatternFill
+        from openpyxl.utils import get_column_letter
 
         for sheet in workbook.worksheets:
             for cell in sheet[1]:
@@ -364,9 +365,9 @@ class DocGenerator:
                 cell.fill = PatternFill("solid", fgColor="DCE6F1")
             sheet.freeze_panes = "A2"
             sheet.auto_filter.ref = sheet.dimensions
-            for column in sheet.columns:
+            for column_index, column in enumerate(sheet.columns, start=1):
                 width = min(48, max(10, max(len(str(cell.value or "")) for cell in column) + 2))
-                sheet.column_dimensions[column[0].column_letter].width = width
+                sheet.column_dimensions[get_column_letter(column_index)].width = width
 
     @staticmethod
     def _unique_sheet_name(name: str, used: set[str]) -> str:

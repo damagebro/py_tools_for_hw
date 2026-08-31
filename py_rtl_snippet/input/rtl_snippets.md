@@ -51,7 +51,7 @@ abc #(
 endmodule
 ```
 
-## rtl-always
+## rtl-always_dff_no_rst
 
 - title: RTL clocked always
 - description: Clocked always block.
@@ -63,7 +63,7 @@ always @(posedge clk) begin
 end
 ```
 
-## rtl-dff-an
+## rtl-always_dff
 
 - title: RTL DFF async reset
 - description: DFF with active-low asynchronous reset.
@@ -77,7 +77,7 @@ always @(posedge clk or negedge rst_n) begin
 end
 ```
 
-## rtl-dff
+## rtl-always_dff_begin_end
 
 - title: RTL DFF async reset, with if(xx) begin end
 - description: DFF with active-low asynchronous reset.
@@ -93,7 +93,7 @@ always @(posedge clk or negedge rst_n) begin
 end
 ```
 
-## rtl-comb
+## rtl-always_comb
 
 - title: RTL combinational always
 - description: Combinational always block.
@@ -140,7 +140,7 @@ typedef enum logic [${1:1}:0] {
 } ${6:state_te};${0}
 ```
 
-## vld-rdy-port
+## rtl-vld_rdy
 
 - title: Valid-ready ports
 - description: Valid-ready receive and transmit port group.
@@ -155,7 +155,7 @@ output logic               o_tx_valid   ,
 input  logic               i_tx_ready   ,
 ```
 
-## ram-port
+## rtl-ram_port
 
 - title: RAM ports
 - description: Single-port RAM request and response port group.
@@ -176,23 +176,23 @@ output wire                o_rx_rd_ack   ,
 output wire [DW-1:0]       o_rx_rd_data  ,
 ```
 
-## csr-port
+## rtl-csr_port
 
 - title: CSR ports
 - description: CSR request and response port group.
 
 ```systemverilog
-input  wire                         i_rx_csr_req_write   ,
-input  wire [CSR_AW-1:0]            i_rx_csr_req_addr    ,
-input  wire [CSR_DW-1:0]            i_rx_csr_req_wdata   ,
-input  wire [CSR_DW/8-1:0]          i_rx_csr_req_wstrb   ,
-input  wire                         i_rx_csr_req_valid   ,
-output wire                         o_rx_csr_req_ready   ,
-output wire                         o_rx_csr_rsp_rvalid  ,
-output wire [CSR_DW-1:0]            o_rx_csr_rsp_rdata   ,
+input  wire                     i_rx_csr_req_write   ,
+input  wire [CSR_AW-1:0]        i_rx_csr_req_addr    ,
+input  wire [CSR_DW-1:0]        i_rx_csr_req_wdata   ,
+input  wire [CSR_DW/8-1:0]      i_rx_csr_req_wstrb   ,
+input  wire                     i_rx_csr_req_valid   ,
+output wire                     o_rx_csr_req_ready   ,
+output wire                     o_rx_csr_rsp_rvalid  ,
+output wire [CSR_DW-1:0]        o_rx_csr_rsp_rdata   ,
 ```
 
-## ebus-rdport
+## rtl-ebus_rdport
 
 - title: eBus read ports
 - description: eBus read request and response port group.
@@ -209,7 +209,7 @@ output wire                     o_rx_ebus_rd_valid   ,
 input  wire                     i_rx_ebus_rd_ready   ,
 ```
 
-## ebus-wrport
+## rtl-ebus_wrport
 
 - title: eBus write ports
 - description: eBus write request and response port group.
@@ -226,7 +226,7 @@ output wire                     o_rx_ebus_wd_ready   ,
 output wire                     o_rx_ebus_wb_valid   ,
 ```
 
-## apb-port
+## rtl-apb_port
 
 - title: APB ports
 - description: APB slave port group without clock and reset.
@@ -243,7 +243,7 @@ output logic [${2}-1:0]         o_apb_prdata  ,
 output logic                    o_apb_pslverr ,
 ```
 
-## axi4-port
+## rtl-axi4_port
 
 - title: AXI4 ports
 - description: AXI4 slave port group with all mandatory five-channel signals.

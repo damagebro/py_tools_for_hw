@@ -605,7 +605,7 @@ def format_module_instance(module: ModuleInfo) -> str:
     return "\n".join(lines)
 
 
-def generate_inst(rtl_path: Path, out_path: Path) -> list[ModuleInfo]:
+def render_inst(rtl_path: Path) -> tuple[str, list[ModuleInfo]]:
     text = rtl_path.read_text(encoding="utf-8")
     modules = parse_modules(text)
     if not modules:
@@ -616,7 +616,12 @@ def generate_inst(rtl_path: Path, out_path: Path) -> list[ModuleInfo]:
         "\n\n".join(format_module_instance(module) for module in modules),
         "",
     ]
-    out_path.write_text("\n".join(snippets), encoding="utf-8")
+    return "\n".join(snippets), modules
+
+
+def generate_inst(rtl_path: Path, out_path: Path) -> list[ModuleInfo]:
+    content, modules = render_inst(rtl_path)
+    out_path.write_text(content, encoding="utf-8")
     return modules
 
 
@@ -625,11 +630,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         description="Generate SystemVerilog integration instance snippet."
     )
     parser.add_argument("rtl_abs_path", help="RTL absolute path")
-    parser.add_argument(
+    output_group = parser.add_mutually_exclusive_group()
+    output_group.add_argument(
         "-o",
         "--output",
-        default="inst.sv",
         help="output snippet file, default: inst.sv",
+    )
+    output_group.add_argument(
+        "--stdout",
+        action="store_true",
+        help="write only the generated snippet to stdout",
     )
     return parser.parse_args(argv)
 
@@ -640,7 +650,12 @@ def main(argv: list[str]) -> int:
     if not rtl_path.is_file():
         print(f"error: RTL file not found: {rtl_path}", file=sys.stderr)
         return 1
-    out_path = Path(args.output)
+    if args.stdout:
+        content, _ = render_inst(rtl_path)
+        sys.stdout.write(content)
+        return 0
+
+    out_path = Path(args.output or "inst.sv")
     modules = generate_inst(rtl_path, out_path)
     names = ", ".join(module.name for module in modules)
     print(f"generated {out_path} for module(s): {names}")

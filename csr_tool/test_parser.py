@@ -6,7 +6,7 @@ import shutil
 import uuid
 from pathlib import Path
 
-from src.autogen_reg import run
+from src.autogen_reg import main, run
 from src.reg_common import CSRValidationError
 from src.reg_parser import CSRParser
 
@@ -36,6 +36,90 @@ tempfile.TemporaryDirectory = WorkspaceTemporaryDirectory
 
 
 class ParserTests(unittest.TestCase):
+    def test_template_command_generates_markdown_and_excel(self) -> None:
+        try:
+            import openpyxl
+        except ImportError:
+            self.skipTest("openpyxl is unavailable")
+        with tempfile.TemporaryDirectory() as temp:
+            markdown = Path(temp) / "reg_define.md"
+            markdown_with_base = Path(temp) / "reg_define_with_base.md"
+            excel = Path(temp) / "reg_define.xlsx"
+            excel_with_base = Path(temp) / "reg_define_with_base.xlsx"
+            self.assertEqual(0, main(["template", "-o", str(markdown)]))
+            self.assertEqual(0, main(["template", "-o", str(excel)]))
+            self.assertEqual(
+                0,
+                main([
+                    "template",
+                    "--base-info",
+                    "-o",
+                    str(markdown_with_base),
+                ]),
+            )
+            self.assertEqual(
+                0,
+                main([
+                    "template",
+                    "--base-info",
+                    "-o",
+                    str(excel_with_base),
+                ]),
+            )
+            markdown_text = markdown.read_text(encoding="utf-8")
+            self.assertNotIn("# base_info", markdown_text)
+            self.assertIn("# reg_define", markdown_text)
+            self.assertNotIn("# 填写说明", markdown_text)
+            self.assertIn(
+                "# base_info",
+                markdown_with_base.read_text(encoding="utf-8"),
+            )
+            self.assertEqual("reg_define", CSRParser(str(markdown)).parse().name)
+            self.assertEqual("reg_define", CSRParser(str(excel)).parse().name)
+            self.assertEqual(
+                "reg_define_with_base",
+                CSRParser(str(markdown_with_base)).parse().name,
+            )
+            self.assertEqual(
+                "reg_define_with_base",
+                CSRParser(str(excel_with_base)).parse().name,
+            )
+
+            workbook = openpyxl.load_workbook(excel, data_only=True)
+            try:
+                self.assertEqual(["reg_define"], workbook.sheetnames)
+                headers = [cell.value for cell in workbook["reg_define"][1]]
+                self.assertEqual(
+                    [
+                        "offset",
+                        "reg_name",
+                        "field",
+                        "msb",
+                        "lsb",
+                        "SW_access",
+                        "default_value",
+                        "reg_type",
+                        "special",
+                        "description",
+                    ],
+                    headers,
+                )
+                self.assertEqual(
+                    2,
+                    len(workbook["reg_define"].data_validations.dataValidation),
+                )
+            finally:
+                workbook.close()
+
+            workbook = openpyxl.load_workbook(excel_with_base, data_only=True)
+            try:
+                self.assertEqual(
+                    ["base_info", "reg_define"],
+                    workbook.sheetnames,
+                )
+            finally:
+                workbook.close()
+
     def test_nested_address_map_and_name_deduplication(self) -> None:
         module = CSRParser(str(ROOT / "input" / "top_reg.md"), nested=True).parse()
         self.assertEqual(module.name, "top")
@@ -736,7 +820,10 @@ class ParserTests(unittest.TestCase):
                 data_only=True,
             )
             try:
-                address_rows = list(workbook["address_map"].values)
+                address_rows = [
+                    tuple(cell.value for cell in row)
+                    for row in workbook["address_map"].iter_rows()
+                ]
                 self.assertEqual(
                     address_rows[0],
                     ("block", "address_range", "bytesize", "link"),
@@ -748,7 +835,10 @@ class ParserTests(unittest.TestCase):
                 self.assertIn("1_1_2_leaf_a2_u1", workbook.sheetnames)
                 self.assertIn("1_2_1_leaf_a2_u2", workbook.sheetnames)
 
-                mid_rows = list(workbook["1_1_mid_a"].values)
+                mid_rows = [
+                    tuple(cell.value for cell in row)
+                    for row in workbook["1_1_mid_a"].iter_rows()
+                ]
                 self.assertEqual(mid_rows[0][0], "address")
                 self.assertEqual(mid_rows[1][0], "0xF0001000")
                 self.assertEqual(mid_rows[1][1], "mid_cfg")

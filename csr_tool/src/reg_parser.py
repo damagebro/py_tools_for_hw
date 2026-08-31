@@ -191,30 +191,46 @@ class CSRParser:
                 "openpyxl is required for .xlsx input"
             ) from exc
         workbook = openpyxl.load_workbook(path, data_only=True, read_only=True)
-        if "reg_define" not in workbook.sheetnames:
-            raise CSRValidationError(
-                f"{path.name}: workbook requires a 'reg_define' sheet"
-            )
-        base_data: dict[str, Any] = {}
-        if "base_info" in workbook.sheetnames:
-            rows = list(workbook["base_info"].iter_rows(values_only=True))
-            for row in rows[1:]:
-                if row and row[0] not in (None, ""):
-                    base_data[str(row[0]).strip()] = row[1] if len(row) > 1 else ""
-        reg_values = list(workbook["reg_define"].iter_rows(values_only=True))
-        if not reg_values:
-            raise CSRValidationError(f"{path.name}: 'reg_define' sheet is empty")
-        headers = [str(item or "").strip().lower() for item in reg_values[0]]
-        register_rows = []
-        for row_index, values in enumerate(reg_values[1:], start=1):
-            if not any(item not in (None, "") for item in values):
-                continue
-            padded = list(values) + [""] * (len(headers) - len(values))
-            register_rows.append({
-                **dict(zip(headers, padded[: len(headers)])),
-                "__row__": row_index,
-            })
-        return base_data, register_rows
+        try:
+            if "reg_define" not in workbook.sheetnames:
+                raise CSRValidationError(
+                    f"{path.name}: workbook requires a 'reg_define' sheet"
+                )
+            base_data: dict[str, Any] = {}
+            if "base_info" in workbook.sheetnames:
+                rows = self._worksheet_values(workbook["base_info"])
+                for row in rows[1:]:
+                    if row and row[0] not in (None, ""):
+                        base_data[str(row[0]).strip()] = (
+                            row[1] if len(row) > 1 else ""
+                        )
+            reg_values = self._worksheet_values(workbook["reg_define"])
+            if not reg_values:
+                raise CSRValidationError(
+                    f"{path.name}: 'reg_define' sheet is empty"
+                )
+            headers = [
+                str(item or "").strip().lower() for item in reg_values[0]
+            ]
+            register_rows = []
+            for row_index, values in enumerate(reg_values[1:], start=1):
+                if not any(item not in (None, "") for item in values):
+                    continue
+                padded = list(values) + [""] * (len(headers) - len(values))
+                register_rows.append({
+                    **dict(zip(headers, padded[: len(headers)])),
+                    "__row__": row_index,
+                })
+            return base_data, register_rows
+        finally:
+            workbook.close()
+
+    @staticmethod
+    def _worksheet_values(sheet: object) -> list[tuple[Any, ...]]:
+        return [
+            tuple(cell.value for cell in row)
+            for row in sheet.iter_rows()
+        ]
 
     def _parse_base_info(
         self, data: dict[str, Any], path: Path

@@ -9,6 +9,26 @@ from pathlib import Path
 
 
 SNIPPET_MD_PATH = Path(__file__).resolve().parents[1] / "input" / "rtl_snippets.md"
+SNIPPET_JSON_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "snippets"
+    / "systemverilog.code-snippets"
+)
+ALWAYS_PREFIXES = (
+    "rtl-always_dff_no_rst",
+    "rtl-always_dff",
+    "rtl-always_dff_begin_end",
+    "rtl-always_comb",
+)
+PORT_PREFIXES = (
+    "rtl-vld_rdy",
+    "rtl-ram_port",
+    "rtl-csr_port",
+    "rtl-ebus_rdport",
+    "rtl-ebus_wrport",
+    "rtl-apb_port",
+    "rtl-axi4_port",
+)
 DEFAULT_PLACEHOLDER_RE = re.compile(r"\$\{(\d+):([^{}]*)\}")
 REFERENCE_PLACEHOLDER_RE = re.compile(r"\$\{(\d+)\}|\$(\d+)")
 SECTION_RE = re.compile(r"(?ms)^##\s+(?P<prefix>\S+)\s*\n(?P<content>.*?)(?=^##\s+|\Z)")
@@ -138,13 +158,14 @@ def generate_preview(snippets: dict[str, object], output_path: Path) -> None:
             ]
         )
 
-    for prefix in ("rtl-always", "rtl-dff-an", "rtl-dff", "rtl-comb"):
+    for prefix in ALWAYS_PREFIXES:
         title = title_for_prefix(snippets, prefix)
         if title is not None:
             sections.append(snippet_body(snippets, title))
 
-    for title, item in snippets.items():
-        if isinstance(item, dict) and str(item.get("prefix", "")).endswith("port"):
+    for prefix in PORT_PREFIXES:
+        title = title_for_prefix(snippets, prefix)
+        if title is not None:
             sections.append(snippet_body(snippets, title))
     output_path.parent.mkdir(parents=True, exist_ok=True)
     content = "\n\n".join("\n".join(section) for section in sections) + "\n"
@@ -188,10 +209,14 @@ def main(argv: list[str]) -> int:
         elif args.print:
             print(json.dumps(snippets, indent=4, ensure_ascii=False))
         else:
+            rows = []
             for item in snippets.values():
                 if not isinstance(item, dict):
                     raise RuntimeError("snippet entry must be an object")
-                print(f"{item['prefix']:<16} {item['description']}")
+                rows.append((str(item["prefix"]), str(item["description"])))
+            prefix_width = max(len(prefix) for prefix, _ in rows)
+            for prefix, description in rows:
+                print(f"{prefix:<{prefix_width}}  {description}")
     except RuntimeError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

@@ -4,7 +4,7 @@
 | :----------- | :---------------- | ----------- |
 | reg_bitwidth | 32                | -           |
 | system_addr  | 0xf0000000        | -           |
-| system_size  | 0x1000            | 16KiB       |
+| system_size  | 0x4000            | 16KiB       |
 | author       | dmg               | -           |
 | email        | dmg@sensetime.com | -           |
 

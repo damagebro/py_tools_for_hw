@@ -20,6 +20,12 @@ inst.sv
 python -B src/gen_rtl_inst.py C:/abs/path/to/rtl.sv -o out_inst.sv
 ```
 
+需要把例化片段直接交给编辑器或其他脚本时，使用 `--stdout`，此时不生成 `inst.sv`：
+
+```bash
+python -B src/gen_rtl_inst.py C:/abs/path/to/rtl.sv --stdout
+```
+
 ## 功能说明
 
 - 提取 `module`、端口参数列表中的 `parameter`，以及 module 内部声明的 `parameter`。
