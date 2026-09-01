@@ -1,0 +1,317 @@
+{
+    "name": "dmg-hw-tool",
+    "displayName": "HW Tool",
+    "description": "VS Code integration for the DMG hardware development tools.",
+    "version": "0.4.0",
+    "publisher": "dmg",
+    "license": "UNLICENSED",
+    "engines": {
+        "vscode": "^1.85.0"
+    },
+    "categories": [
+        "Snippets",
+        "Other"
+    ],
+    "main": "./src/extension.js",
+    "activationEvents": [
+        "onCommand:dmgHwTool.csr.newDefinition",
+        "onCommand:dmgHwTool.csr.newDefaultDefinition",
+        "onCommand:dmgHwTool.docs.openCsr",
+        "onCommand:dmgHwTool.docs.openMemory",
+        "onCommand:dmgHwTool.docs.openTool",
+        "onCommand:dmgHwTool.preview.changeTheme",
+        "onCommand:dmgHwTool.md2html.convert",
+        "onCommand:dmgHwTool.csr.generateSingle",
+        "onCommand:dmgHwTool.csr.generateNested",
+        "onCommand:dmgHwTool.csr.openTreeHtml",
+        "onCommand:dmgHwTool.csr.insertRegisterRow",
+        "onCommand:dmgHwTool.rtlInst.replaceSelectedPath",
+        "onCommand:dmgHwTool.rtlInst.insertFromFile",
+        "onCommand:dmgHwTool.rtlInst.copy",
+        "onCommand:dmgHwTool.rtlDummy.generate",
+        "onCommand:dmgHwTool.genTb.empty",
+        "onCommand:dmgHwTool.genTb.fromFilelist",
+        "onCommand:dmgHwTool.memTool.init",
+        "onCommand:dmgHwTool.memTool.inst",
+        "onCommand:dmgHwTool.rtlFlist.generate",
+        "onCommand:dmgHwTool.rtlFlist.refreshCores",
+        "onCommand:dmgHwTool.gitRepo.status",
+        "onCommand:dmgHwTool.gitRepo.sync",
+        "onCommand:dmgHwTool.gitRepo.graph",
+        "onView:dmgHwTool.rtlCores"
+    ],
+    "contributes": {
+        "commands": [
+            {
+                "command": "dmgHwTool.csr.newDefinition",
+                "title": "HW Tool: Create CSR Template..."
+            },
+            {
+                "command": "dmgHwTool.csr.newDefaultDefinition",
+                "title": "HW Tool: Create Default CSR Template"
+            },
+            {
+                "command": "dmgHwTool.docs.openCsr",
+                "title": "HW Tool: Open CSR Documentation"
+            },
+            {
+                "command": "dmgHwTool.docs.openMemory",
+                "title": "HW Tool: Open Memory Tool Documentation"
+            },
+            {
+                "command": "dmgHwTool.docs.openTool",
+                "title": "HW Tool: Open Tool Documentation..."
+            },
+            {
+                "command": "dmgHwTool.preview.changeTheme",
+                "title": "HW Tool: Change Preview Theme..."
+            },
+            {
+                "command": "dmgHwTool.md2html.convert",
+                "title": "HW Tool: Convert Markdown to HTML..."
+            },
+            {
+                "command": "dmgHwTool.csr.generateSingle",
+                "title": "HW Tool: Generate CSR (Single)"
+            },
+            {
+                "command": "dmgHwTool.csr.generateNested",
+                "title": "HW Tool: Generate CSR (Nested)"
+            },
+            {
+                "command": "dmgHwTool.csr.openTreeHtml",
+                "title": "HW Tool: Open CSR Tree HTML"
+            },
+            {
+                "command": "dmgHwTool.csr.insertRegisterRow",
+                "title": "HW Tool: Insert CSR Register Row..."
+            },
+            {
+                "command": "dmgHwTool.rtlInst.replaceSelectedPath",
+                "title": "HW Tool: Replace Selected RTL Path With Instance"
+            },
+            {
+                "command": "dmgHwTool.rtlInst.insertFromFile",
+                "title": "HW Tool: Insert RTL Instance From File..."
+            },
+            {
+                "command": "dmgHwTool.rtlInst.copy",
+                "title": "HW Tool: Copy RTL Instance"
+            },
+            {
+                "command": "dmgHwTool.rtlDummy.generate",
+                "title": "HW Tool: Generate RTL Dummy..."
+            },
+            {
+                "command": "dmgHwTool.genTb.empty",
+                "title": "HW Tool: Generate Empty TB Environment"
+            },
+            {
+                "command": "dmgHwTool.genTb.fromFilelist",
+                "title": "HW Tool: Generate TB From Current Filelist..."
+            },
+            {
+                "command": "dmgHwTool.memTool.init",
+                "title": "HW Tool: Generate Memory Shell..."
+            },
+            {
+                "command": "dmgHwTool.memTool.inst",
+                "title": "HW Tool: Integrate Memory From Excel"
+            },
+            {
+                "command": "dmgHwTool.rtlFlist.generate",
+                "title": "HW Tool: Generate RTL Filelist..."
+            },
+            {
+                "command": "dmgHwTool.rtlFlist.refreshCores",
+                "title": "HW Tool: Refresh RTL Core List",
+                "icon": "$(refresh)"
+            },
+            {
+                "command": "dmgHwTool.gitRepo.status",
+                "title": "HW Tool: Git Repository Status"
+            },
+            {
+                "command": "dmgHwTool.gitRepo.sync",
+                "title": "HW Tool: Sync Git Repositories..."
+            },
+            {
+                "command": "dmgHwTool.gitRepo.graph",
+                "title": "HW Tool: Open Git Dependency Graph..."
+            }
+        ],
+        "menus": {
+            "editor/context": [
+                {
+                    "command": "dmgHwTool.md2html.convert",
+                    "when": "resourceExtname == .md || resourceExtname == .markdown",
+                    "group": "navigation@10"
+                },
+                {
+                    "command": "dmgHwTool.csr.generateSingle",
+                    "when": "resourceExtname == .md || resourceExtname == .xlsx",
+                    "group": "navigation@20"
+                },
+                {
+                    "command": "dmgHwTool.csr.generateNested",
+                    "when": "resourceExtname == .md || resourceExtname == .xlsx",
+                    "group": "navigation@21"
+                },
+                {
+                    "command": "dmgHwTool.csr.insertRegisterRow",
+                    "when": "resourceExtname == .md && editorTextFocus",
+                    "group": "navigation@22"
+                },
+                {
+                    "command": "dmgHwTool.rtlInst.replaceSelectedPath",
+                    "when": "editorHasSelection && (editorLangId == verilog || editorLangId == systemverilog)",
+                    "group": "navigation@30"
+                },
+                {
+                    "command": "dmgHwTool.rtlInst.insertFromFile",
+                    "when": "editorLangId == verilog || editorLangId == systemverilog",
+                    "group": "navigation@31"
+                },
+                {
+                    "command": "dmgHwTool.rtlInst.copy",
+                    "when": "editorLangId == verilog || editorLangId == systemverilog",
+                    "group": "navigation@32"
+                },
+                {
+                    "command": "dmgHwTool.rtlDummy.generate",
+                    "when": "editorLangId == verilog || editorLangId == systemverilog",
+                    "group": "navigation@40"
+                },
+                {
+                    "command": "dmgHwTool.genTb.fromFilelist",
+                    "when": "resourceExtname == .f",
+                    "group": "navigation@50"
+                },
+                {
+                    "command": "dmgHwTool.memTool.inst",
+                    "when": "resourceExtname == .xlsx",
+                    "group": "navigation@60"
+                },
+                {
+                    "command": "dmgHwTool.rtlFlist.generate",
+                    "when": "resourceExtname == .toml || resourceExtname == .core",
+                    "group": "navigation@70"
+                },
+                {
+                    "command": "dmgHwTool.gitRepo.status",
+                    "when": "resourceFilename == git_deps.toml",
+                    "group": "navigation@80"
+                },
+                {
+                    "command": "dmgHwTool.gitRepo.sync",
+                    "when": "resourceFilename == git_deps.toml",
+                    "group": "navigation@81"
+                },
+                {
+                    "command": "dmgHwTool.gitRepo.graph",
+                    "when": "resourceFilename == git_deps.toml",
+                    "group": "navigation@82"
+                }
+            ],
+            "explorer/context": [
+                {
+                    "command": "dmgHwTool.rtlInst.copy",
+                    "when": "resourceExtname == .v || resourceExtname == .sv",
+                    "group": "navigation@30"
+                },
+                {
+                    "command": "dmgHwTool.rtlDummy.generate",
+                    "when": "resourceExtname == .v || resourceExtname == .sv",
+                    "group": "navigation@40"
+                },
+                {
+                    "command": "dmgHwTool.genTb.fromFilelist",
+                    "when": "resourceExtname == .f",
+                    "group": "navigation@50"
+                },
+                {
+                    "command": "dmgHwTool.memTool.inst",
+                    "when": "resourceExtname == .xlsx",
+                    "group": "navigation@60"
+                },
+                {
+                    "command": "dmgHwTool.rtlFlist.generate",
+                    "when": "resourceExtname == .toml || resourceExtname == .core",
+                    "group": "navigation@70"
+                },
+                {
+                    "command": "dmgHwTool.gitRepo.status",
+                    "when": "resourceFilename == git_deps.toml",
+                    "group": "navigation@80"
+                },
+                {
+                    "command": "dmgHwTool.gitRepo.sync",
+                    "when": "resourceFilename == git_deps.toml",
+                    "group": "navigation@81"
+                },
+                {
+                    "command": "dmgHwTool.gitRepo.graph",
+                    "when": "resourceFilename == git_deps.toml",
+                    "group": "navigation@82"
+                }
+            ],
+            "view/title": [
+                {
+                    "command": "dmgHwTool.rtlFlist.refreshCores",
+                    "when": "view == dmgHwTool.rtlCores",
+                    "group": "navigation"
+                }
+            ]
+        },
+        "views": {
+            "explorer": [
+                {
+                    "id": "dmgHwTool.rtlCores",
+                    "name": "RTL Cores"
+                }
+            ]
+        },
+        "snippets": [
+            {
+                "language": "systemverilog",
+                "path": "./resources/systemverilog.code-snippets"
+            },
+            {
+                "language": "verilog",
+                "path": "./resources/systemverilog.code-snippets"
+            }
+        ],
+        "configuration": {
+            "title": "HW Tool",
+            "properties": {
+                "dmgHwTool.pythonPath": {
+                    "type": "string",
+                    "default": "python",
+                    "description": "System Python command or absolute path. Python 3.11+ with jinja2, openpyxl, and Markdown is required."
+                },
+                "dmgHwTool.preview.theme": {
+                    "type": "string",
+                    "enum": [
+                        "light",
+                        "dark",
+                        "auto"
+                    ],
+                    "enumDescriptions": [
+                        "Use a light background.",
+                        "Use a dark background.",
+                        "Follow the current VS Code color theme."
+                    ],
+                    "default": "light",
+                    "description": "Color theme for HW Tool documentation and converted Markdown previews."
+                }
+            }
+        }
+    },
+    "scripts": {
+        "check": "node --check src/extension.js && node --check src/hw_tool_client.js && node --check src/editor_context.js && node --check src/workspace_context.js && node --check src/tools/rtl_inst.js && node --check src/tools/rtl_dummy.js && node --check src/tools/gen_tb.js && node --check src/tools/mem_tool.js && node --check src/tools/rtl_flist.js && node --check src/tools/git_repo.js",
+        "test": "node test/test_helpers.js",
+        "sync-snippets": "python scripts/sync_resources.py",
+        "sync-runtime": "python scripts/sync_runtime.py",
+        "package": "npm run check && npm test && npm run sync-snippets && npm run sync-runtime && python scripts/pack_vsix.py --output out/dmg-hw-tool-0.4.0.vsix"
+    }
+}

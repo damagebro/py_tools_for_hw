@@ -115,7 +115,7 @@ python -B src/hw_tool.py de rtl_inst path/to/child.sv
 
 `hw_tool` 的发布产物可独立为一个目录：发布脚本将已注册工具源码复制到 `repository/`，运行时不再依赖外层 `py_tools_for_hw/`。源码发布保持跨平台；目标机器需提供兼容的 Python 与工具依赖。发布版本推荐固定到 Git tag 或 commit；通过 `hw_tool --version` 可核对实际 tag/commit。
 
-发布目录总览见 [publish/README.md](publish/README.md)。Windows PATH、Linux module load 与 VS Code 分别由 `publish/windows/`、`publish/linux/`、`publish/vscode/` 维护。
+完整操作见 [hw_tool_release_guide.md](hw_tool_release_guide.md)，发布目录总览见 [publish/README.md](publish/README.md)。Windows PATH、Linux module load 与 VS Code 分别由 `publish/windows/`、`publish/linux/`、`publish/vscode/` 维护。
 
 ### Windows PATH
 
@@ -146,7 +146,7 @@ hw_tool.cmd de csr_tool -i register.md --nested -o out
 
 ### Linux module load
 
-管理员按版本保留完整 Git checkout，例如：
+管理员按版本保留 `build_release.py` 生成的独立源码目录，例如：
 
 ```text
 /tools/hw_tool/
@@ -157,14 +157,16 @@ hw_tool.cmd de csr_tool -i register.md --nested -o out
         └── ...
 ```
 
-可按 Git tag 部署一个固定版本：
+构建时，`mem_tool` 默认从注册表中的 `com` Git URL 拉取。可通过 `--repo-ref com=<tag|branch|commit>` 固定其版本；离线环境可改用 `--repo-path com=<checkout>`。以下命令同时生成源码目录和版本化 modulefile：
 
 ```bash
-python -B build_release.py --version 0.1.0
-cp -a out/hw_tool-0.1.0/hw_tool /tools/hw_tool/0.1.0/
+python3 -B hw_tool/publish/build_release.py --version 0.1.0 --repo-ref com=v1.2.0 --no-archive
+sudo mkdir -p /tools/hw_tool/0.1.0 /tools/modulefiles/hw_tool
+sudo cp -a hw_tool/publish/out/hw_tool-0.1.0/hw_tool /tools/hw_tool/0.1.0/
+sudo cp hw_tool/publish/out/hw_tool-0.1.0/modulefiles/hw_tool/0.1.0 /tools/modulefiles/hw_tool/0.1.0
 ```
 
-在 modulefile 根目录创建 `/tools/modulefiles/hw_tool/0.1.0`：
+生成的 `/tools/modulefiles/hw_tool/0.1.0` 内容如下，版本由 `--version` 自动写入，不需要 `sed`：
 
 ```tcl
 #%Module

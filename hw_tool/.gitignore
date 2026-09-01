@@ -7,7 +7,6 @@ groups/
 
 # Generated Windows/Linux source release directories and archives.
 publish/out/
-publish/vscode/
 
 # Existing local development artifacts.
 *bin*

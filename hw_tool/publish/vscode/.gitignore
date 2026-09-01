@@ -1,0 +1,5 @@
+# Generated VS Code runtime and package artifacts.
+out/
+runtime/
+node_modules/
+*.vsix

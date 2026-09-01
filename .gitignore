@@ -1,5 +1,14 @@
 __pycache__*
 *build*
+!hw_tool/publish/
+!hw_tool/publish/**
+hw_tool/publish/out/
+hw_tool/publish/vscode/out/
+hw_tool/publish/vscode/runtime/
+hw_tool/publish/vscode/node_modules/
+hw_tool/publish/**/*.vsix
+hw_tool/publish/**/__pycache__/
+hw_tool/publish/**/*.pyc
 out/
 .hw_tool_smoke/
 .test_work/
