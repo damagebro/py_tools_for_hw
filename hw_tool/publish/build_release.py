@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -24,11 +25,13 @@ OUTPUT_ROOT = HW_TOOL_ROOT / "publish" / "out"
 TOOL_REGISTRY_PATH = HW_TOOL_ROOT / "hw_tool_de" / "src" / "tool_registry.py"
 
 
-def load_tool_registry() -> object:
-    module_name = "_hw_tool_release_registry"
-    spec = importlib.util.spec_from_file_location(module_name, TOOL_REGISTRY_PATH)
+def load_tool_registry(
+    registry_path: Path = TOOL_REGISTRY_PATH,
+    module_name: str = "_hw_tool_release_registry",
+) -> object:
+    spec = importlib.util.spec_from_file_location(module_name, registry_path)
     if spec is None or spec.loader is None:
-        raise ImportError(f"cannot load tool registry: {TOOL_REGISTRY_PATH}")
+        raise ImportError(f"cannot load tool registry: {registry_path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
@@ -52,6 +55,8 @@ PY_TOOLS_PATHS = (
 EXTERNAL_REPOSITORY_PATHS = {
     "com": ("impl_template/memory/mem_tool",),
 }
+REPOSITORY_NAMES = ("py_tools_for_hw", *EXTERNAL_REPOSITORY_PATHS)
+FULL_COMMIT_PATTERN = re.compile(r"[0-9a-fA-F]{40}")
 
 
 @dataclass(frozen=True)
@@ -61,6 +66,7 @@ class ResolvedRepository:
     source: str
     repository: str
     ref: str
+    ref_kind: str
     commit: str
     dirty: bool
 
@@ -85,7 +91,7 @@ def parse_args() -> argparse.Namespace:
         action="append",
         default=[],
         metavar="NAME=REF",
-        help="Override an external repository branch, tag, or commit.",
+        help="Select a repository branch, tag, or commit.",
     )
     parser.add_argument(
         "--repo-path",
@@ -98,6 +104,14 @@ def parse_args() -> argparse.Namespace:
         "--shallow",
         action="store_true",
         help="Fetch only the selected external repository revision.",
+    )
+    parser.add_argument(
+        "--official",
+        action="store_true",
+        help=(
+            "Build both py_tools_for_hw and com from explicitly selected "
+            "tags or full commits."
+        ),
     )
     parser.add_argument(
         "--linux-install-root",
@@ -114,7 +128,7 @@ def parse_args() -> argparse.Namespace:
 
 def parse_named_values(values: list[str], option: str) -> dict[str, str]:
     parsed: dict[str, str] = {}
-    valid_names = set(EXTERNAL_REPOSITORY_PATHS)
+    valid_names = set(REPOSITORY_NAMES)
     for value in values:
         name, separator, item = value.partition("=")
         if not separator or not name.strip() or not item.strip():
@@ -128,17 +142,26 @@ def parse_named_values(values: list[str], option: str) -> dict[str, str]:
     return parsed
 
 
-def ignore_hw_tool_copy(directory: str, names: list[str]) -> set[str]:
-    ignored: set[str] = set()
-    current = Path(directory).resolve()
-    if current == HW_TOOL_ROOT:
-        ignored.update({"groups", "repository"})
-    if current == HW_TOOL_ROOT / "publish":
-        ignored.add("out")
-    if current == HW_TOOL_ROOT / "publish" / "vscode":
-        ignored.update({"node_modules", "out", "runtime"})
-    ignored.update(name for name in names if name == "__pycache__" or name.endswith(".pyc"))
-    return ignored
+def make_hw_tool_copy_ignore(source_root: Path) -> object:
+    source_root = source_root.resolve()
+
+    def ignore(directory: str, names: list[str]) -> set[str]:
+        ignored: set[str] = set()
+        current = Path(directory).resolve()
+        if current == source_root:
+            ignored.update({"groups", "repository"})
+        if current == source_root / "publish":
+            ignored.add("out")
+        if current == source_root / "publish" / "vscode":
+            ignored.update({"node_modules", "out", "runtime"})
+        ignored.update(
+            name
+            for name in names
+            if name == "__pycache__" or name.endswith(".pyc")
+        )
+        return ignored
+
+    return ignore
 
 
 def copy_tree(source: Path, destination: Path) -> None:
@@ -187,6 +210,64 @@ def repository_state(root: Path) -> tuple[str, bool]:
     return commit, dirty
 
 
+def classify_immutable_ref(repository: str, ref: str) -> str:
+    if FULL_COMMIT_PATTERN.fullmatch(ref):
+        return "commit"
+
+    result = subprocess.run(
+        [
+            "git",
+            "ls-remote",
+            "--exit-code",
+            "--tags",
+            repository,
+            f"refs/tags/{ref}",
+            f"refs/tags/{ref}^{{}}",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        return "tag"
+    if result.returncode not in (0, 2):
+        detail = result.stderr.strip() or result.stdout.strip()
+        raise ValueError(
+            f"failed to inspect repository tags: {repository}: {detail}"
+        )
+    raise ValueError(
+        "official release ref must be an existing tag or full 40-character "
+        f"commit: {repository} @ {ref}"
+    )
+
+
+def validate_release_sources(
+    official: bool,
+    repository_refs: Mapping[str, str],
+    repository_paths: Mapping[str, Path],
+) -> None:
+    if official:
+        missing = [name for name in REPOSITORY_NAMES if name not in repository_refs]
+        if missing:
+            raise ValueError(
+                "--official requires --repo-ref for: " + ", ".join(missing)
+            )
+        if repository_paths:
+            raise ValueError("--official does not allow --repo-path")
+        return
+
+    if "py_tools_for_hw" in repository_refs:
+        raise ValueError(
+            "py_tools_for_hw --repo-ref requires --official; development "
+            "release uses the current workspace"
+        )
+    if "py_tools_for_hw" in repository_paths:
+        raise ValueError(
+            "py_tools_for_hw --repo-path is not supported; development "
+            "release uses the current workspace"
+        )
+
+
 def clone_repository(repository: str, ref: str, destination: Path, shallow: bool) -> None:
     if shallow:
         destination.mkdir(parents=True)
@@ -221,6 +302,7 @@ def resolve_external_repository(
     ref: str,
     local_path: Path | None,
     shallow: bool,
+    require_immutable_ref: bool = False,
 ) -> Iterator[ResolvedRepository]:
     if local_path is not None:
         root = local_path.expanduser().resolve()
@@ -231,6 +313,7 @@ def resolve_external_repository(
             source="path",
             repository=spec.repository,
             ref="working-tree",
+            ref_kind="working-tree",
             commit=commit,
             dirty=dirty,
         )
@@ -238,6 +321,11 @@ def resolve_external_repository(
 
     with tempfile.TemporaryDirectory(prefix=f"hw_tool_{spec.name}_") as temporary_directory:
         root = Path(temporary_directory) / spec.name
+        ref_kind = (
+            classify_immutable_ref(spec.repository, ref)
+            if require_immutable_ref
+            else "configured-ref"
+        )
         clone_repository(spec.repository, ref, root, shallow)
         commit, dirty = repository_state(root)
         yield ResolvedRepository(
@@ -246,6 +334,7 @@ def resolve_external_repository(
             source="url",
             repository=spec.repository,
             ref=ref,
+            ref_kind=ref_kind,
             commit=commit,
             dirty=dirty,
         )
@@ -260,6 +349,7 @@ def workspace_repository() -> ResolvedRepository:
         source="workspace",
         repository=spec.repository,
         ref="working-tree",
+        ref_kind="working-tree",
         commit=commit,
         dirty=dirty,
     )
@@ -273,11 +363,13 @@ def write_release_info(
     path: Path,
     version: str,
     repositories: list[ResolvedRepository],
+    official: bool,
 ) -> None:
     lines = [
         "[release]",
         f'version = "{toml_string(version)}"',
         f'built_at = "{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}"',
+        f"official = {str(official).lower()}",
     ]
     for repository in repositories:
         lines.extend([
@@ -286,6 +378,7 @@ def write_release_info(
             f'source = "{repository.source}"',
             f'url = "{toml_string(repository.repository)}"',
             f'ref = "{toml_string(repository.ref)}"',
+            f'ref_kind = "{repository.ref_kind}"',
             f'commit = "{repository.commit}"',
             f"dirty = {str(repository.dirty).lower()}",
         ])
@@ -325,43 +418,103 @@ def build_release(
     repository_paths: Mapping[str, Path] | None = None,
     shallow: bool = False,
     linux_install_root: str = "/tools/hw_tool",
+    official: bool = False,
 ) -> tuple[Path, Path | None]:
     repository_refs = repository_refs or {}
     repository_paths = repository_paths or {}
+    validate_release_sources(official, repository_refs, repository_paths)
     release_root = output_root.resolve() / f"hw_tool-{version}"
     tool_root = release_root / "hw_tool"
 
     with ExitStack() as stack:
-        external_repositories: dict[str, ResolvedRepository] = {}
-        for name in EXTERNAL_REPOSITORY_PATHS:
-            spec = REPOSITORY_MAP[name]
-            resolved = stack.enter_context(resolve_external_repository(
-                spec,
-                repository_refs.get(name, spec.branch),
-                repository_paths.get(name),
-                shallow,
-            ))
-            external_repositories[name] = resolved
+        repositories: dict[str, ResolvedRepository] = {}
+        if official:
+            py_tools_spec = REPOSITORY_MAP["py_tools_for_hw"]
+            py_tools_repository = stack.enter_context(
+                resolve_external_repository(
+                    py_tools_spec,
+                    repository_refs["py_tools_for_hw"],
+                    None,
+                    shallow,
+                    require_immutable_ref=True,
+                )
+            )
+            repositories["py_tools_for_hw"] = py_tools_repository
+
+            selected_registry_path = (
+                py_tools_repository.root
+                / "hw_tool"
+                / "hw_tool_de"
+                / "src"
+                / "tool_registry.py"
+            )
+            try:
+                selected_registry = load_tool_registry(
+                    selected_registry_path,
+                    "_hw_tool_selected_release_registry",
+                )
+                selected_repository_map = selected_registry.REPOSITORY_MAP
+            except (AttributeError, ImportError, OSError) as exc:
+                raise ValueError(
+                    "cannot load repository registry from selected "
+                    f"py_tools_for_hw ref: {exc}"
+                ) from exc
+            if "com" not in selected_repository_map:
+                raise ValueError(
+                    "selected py_tools_for_hw ref does not register com"
+                )
+            com_spec = selected_repository_map["com"]
+            repositories["com"] = stack.enter_context(
+                resolve_external_repository(
+                    com_spec,
+                    repository_refs["com"],
+                    None,
+                    shallow,
+                    require_immutable_ref=True,
+                )
+            )
+        else:
+            repositories["py_tools_for_hw"] = workspace_repository()
+            com_spec = REPOSITORY_MAP["com"]
+            repositories["com"] = stack.enter_context(
+                resolve_external_repository(
+                    com_spec,
+                    repository_refs.get("com", com_spec.branch),
+                    repository_paths.get("com"),
+                    shallow,
+                )
+            )
+
+        py_tools_root = repositories["py_tools_for_hw"].root
+        source_hw_tool_root = py_tools_root / "hw_tool"
 
         if release_root.exists():
             shutil.rmtree(release_root, onerror=remove_readonly)
-        shutil.copytree(HW_TOOL_ROOT, tool_root, ignore=ignore_hw_tool_copy)
+        shutil.copytree(
+            source_hw_tool_root,
+            tool_root,
+            ignore=make_hw_tool_copy_ignore(source_hw_tool_root),
+        )
         repository_root = tool_root / "repository"
 
         for relative_path in PY_TOOLS_PATHS:
             copy_tree(
-                SOURCE_ROOT / relative_path,
+                py_tools_root / relative_path,
                 repository_root / "py_tools_for_hw" / relative_path,
             )
         for name, relative_paths in EXTERNAL_REPOSITORY_PATHS.items():
             for relative_path in relative_paths:
                 copy_tree(
-                    external_repositories[name].root / relative_path,
+                    repositories[name].root / relative_path,
                     repository_root / name / relative_path,
                 )
 
-        repositories = [workspace_repository(), *external_repositories.values()]
-        write_release_info(tool_root / "release_info.toml", version, repositories)
+        write_release_info(
+            tool_root / "release_info.toml",
+            version,
+            list(repositories.values()),
+            official,
+        )
         write_linux_modulefile(release_root, version, linux_install_root)
 
     archive_path = None
@@ -388,12 +541,15 @@ def main() -> int:
             repository_paths=repository_paths,
             shallow=args.shallow,
             linux_install_root=args.linux_install_root,
+            official=args.official,
         )
     except (OSError, ValueError) as exc:
         print(f"[ERROR] {exc}", file=sys.stderr)
         return 1
 
     modulefile = tool_root.parent / "modulefiles" / "hw_tool" / args.version
+    mode = "official" if args.official else "development"
+    print(f"[OK] release mode: {mode}")
     print(f"[OK] source release: {tool_root}")
     print(f"[OK] Linux modulefile: {modulefile}")
     if archive_path is not None:

@@ -16,27 +16,35 @@ Windows PATH 与 Linux module load 共用 `build_release.py` 生成的离线源�
 
 ### 2.1 仓库来源
 
-构建命令只需在 `py_tools_for_hw` checkout 中运行。`py_tools_for_hw` 工具从当前工作区复制；`mem_tool` 默认根据 `hw_tool_de/src/tool_registry.py` 中登记的 `com` Git URL 临时 clone，不再要求本机存在同级 `com` 仓库。
+构建命令只需在 `py_tools_for_hw` checkout 中运行。开发发布默认从当前 `py_tools_for_hw` 工作区复制工具，并根据 `hw_tool_de/src/tool_registry.py` 中登记的 `com` Git URL 获取 `main`，保留快速验证本地修改的方式。
 
-发布包生成后会把 `mem_tool` 复制进自身的 `repository/com/`，临时 clone 会自动清理，用户端也不需要单独保留 `com` checkout。
+正式发布使用 `--official`，必须同时指定 `py_tools_for_hw` 和 `com` 的 tag 或完整 40 位 commit。两个仓库都会 clone 到临时目录，当前开发工作区即使 dirty 也不会进入发布包；`com` URL 优先从所选 `py_tools_for_hw` 版本的注册表读取。
 
 ### 2.2 固定源码版本
 
-正式发布应从干净的 Git tag 或指定 commit 构建，避免把未确认的本地修改带入发布包。外部 `com` 仓库可通过 `--repo-ref` 指定 branch、tag 或 commit：
+开发发布保持原有简化命令：
 
 ```bash
-git status --short
-git log -1 --oneline
-python -B hw_tool/publish/build_release.py --version 1.1.1 --repo-ref com=v1.2.0
+python -B hw_tool/publish/build_release.py --version 1.1.1
 ```
 
-无网络或需要验证本地修改时，可显式指定本地 checkout；`--repo-path` 的优先级高于 URL：
+此时 `py_tools_for_hw` 使用当前工作区，`com` 默认使用 `main`。无网络或需要验证 `com` 本地修改时，可显式指定本地 checkout；`--repo-path` 的优先级高于 URL：
 
 ```bash
 python -B hw_tool/publish/build_release.py --version 1.1.1 --repo-path com=path/to/com
 ```
 
-构建产物中的 `release_info.toml` 会记录各仓库的 URL、ref、实际 commit、来源方式和 dirty 状态。使用 `--repo-path` 时不会切换或修改本地 checkout，ref 记录为 `working-tree`，实际内容由 commit 和 dirty 状态确定。
+正式发布示例：
+
+```bash
+python -B hw_tool/publish/build_release.py --version 1.1.1 --official \
+    --repo-ref py_tools_for_hw=v1.1.1 \
+    --repo-ref com=v2.3.0
+```
+
+正式模式不接受 branch 或 `--repo-path`，也不会创建 tag；tag 由仓库维护者提前创建。两个 `--repo-ref` 均可替换为完整 40 位 commit。
+
+构建产物中的 `release_info.toml` 会记录 `official`、各仓库 URL、ref 类型、实际 commit、来源方式和 dirty 状态。开发模式使用 `--repo-path` 时不会切换或修改本地 checkout，ref 记录为 `working-tree`。
 
 ### 2.3 安装 Python 依赖
 

@@ -5,18 +5,22 @@ import sys
 import tempfile
 import tomllib
 import unittest
+from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 
 PUBLISH_ROOT = Path(__file__).resolve().parents[1] / "publish"
 sys.path.insert(0, str(PUBLISH_ROOT))
 
 from build_release import (
+    PY_TOOLS_PATHS,
     REPOSITORY_MAP,
     build_release,
     clone_repository,
     parse_named_values,
     resolve_external_repository,
+    validate_release_sources,
     write_linux_modulefile,
 )
 
@@ -32,27 +36,100 @@ def run_git(root: Path, *arguments: str) -> str:
     return result.stdout.strip()
 
 
-def create_com_repository(root: Path) -> str:
+def initialize_repository(root: Path) -> None:
     root.mkdir(parents=True)
     run_git(root, "init", "--quiet", "--initial-branch=main")
     run_git(root, "config", "user.email", "release-test@example.com")
     run_git(root, "config", "user.name", "Release Test")
+
+
+def commit_repository(root: Path, tag: str | None = None) -> str:
+    run_git(root, "add", ".")
+    run_git(root, "commit", "--quiet", "-m", "initial")
+    if tag is not None:
+        run_git(root, "tag", tag)
+    return run_git(root, "rev-parse", "HEAD")
+
+
+def create_com_repository(root: Path, tag: str | None = None) -> str:
+    initialize_repository(root)
     mem_tool = root / "impl_template" / "memory" / "mem_tool"
     mem_tool.mkdir(parents=True)
     (mem_tool / "README.md").write_text("# mem_tool\n", encoding="utf-8")
-    run_git(root, "add", ".")
-    run_git(root, "commit", "--quiet", "-m", "initial")
-    return run_git(root, "rev-parse", "HEAD")
+    return commit_repository(root, tag)
+
+
+def create_py_tools_repository(root: Path, com_url: str, tag: str) -> str:
+    initialize_repository(root)
+    hw_tool = root / "hw_tool"
+    registry = hw_tool / "hw_tool_de" / "src" / "tool_registry.py"
+    registry.parent.mkdir(parents=True)
+    registry.write_text(
+        "from dataclasses import dataclass\n\n"
+        "@dataclass(frozen=True)\n"
+        "class RepositorySpec:\n"
+        "    name: str\n"
+        "    repository: str\n"
+        "    branch: str\n"
+        "    checkout: str\n"
+        "    workspace: str | None = None\n\n"
+        "REPOSITORY_MAP = {\n"
+        "    'com': RepositorySpec(\n"
+        "        name='com',\n"
+        f"        repository={com_url!r},\n"
+        "        branch='main',\n"
+        "        checkout='../repository/com',\n"
+        "    ),\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    (hw_tool / "TAGGED_SOURCE.txt").write_text(
+        "source from selected tag\n",
+        encoding="utf-8",
+    )
+    for relative_path in PY_TOOLS_PATHS:
+        tool_root = root / relative_path
+        tool_root.mkdir(parents=True)
+        (tool_root / "README.md").write_text(
+            f"# {relative_path}\n",
+            encoding="utf-8",
+        )
+    return commit_repository(root, tag)
 
 
 class ReleaseTest(unittest.TestCase):
     def test_parse_named_values(self) -> None:
         self.assertEqual(
-            parse_named_values(["com=v1.1.1"], "--repo-ref"),
-            {"com": "v1.1.1"},
+            parse_named_values(
+                ["py_tools_for_hw=v1.1.1", "com=v2.0.0"],
+                "--repo-ref",
+            ),
+            {"py_tools_for_hw": "v1.1.1", "com": "v2.0.0"},
         )
         with self.assertRaisesRegex(ValueError, "unknown repository"):
             parse_named_values(["unknown=main"], "--repo-ref")
+
+    def test_official_release_requires_both_refs_and_disallows_paths(self) -> None:
+        with self.assertRaisesRegex(ValueError, "requires --repo-ref for: com"):
+            validate_release_sources(
+                True,
+                {"py_tools_for_hw": "v1.0.0"},
+                {},
+            )
+        with self.assertRaisesRegex(ValueError, "does not allow --repo-path"):
+            validate_release_sources(
+                True,
+                {"py_tools_for_hw": "v1.0.0", "com": "v1.0.0"},
+                {"com": Path("local")},
+            )
+
+    def test_development_release_keeps_py_tools_workspace(self) -> None:
+        with self.assertRaisesRegex(ValueError, "requires --official"):
+            validate_release_sources(
+                False,
+                {"py_tools_for_hw": "v1.0.0"},
+                {},
+            )
 
     def test_clone_repository_full_and_shallow(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -123,9 +200,82 @@ class ReleaseTest(unittest.TestCase):
                 (tool_root / "release_info.toml").read_text(encoding="utf-8")
             )
             self.assertEqual(metadata["release"]["version"], "1.1.1")
+            self.assertFalse(metadata["release"]["official"])
             self.assertEqual(metadata["repository"]["com"]["source"], "path")
             self.assertEqual(metadata["repository"]["com"]["ref"], "working-tree")
             self.assertEqual(metadata["repository"]["com"]["commit"], commit)
+
+    def test_official_release_clones_both_selected_repositories(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            com_source = temporary_root / "com"
+            com_commit = create_com_repository(com_source)
+            py_tools_source = temporary_root / "py_tools_for_hw"
+            py_tools_commit = create_py_tools_repository(
+                py_tools_source,
+                com_source.as_uri(),
+                "v1.0.0",
+            )
+            py_tools_spec = replace(
+                REPOSITORY_MAP["py_tools_for_hw"],
+                repository=py_tools_source.as_uri(),
+            )
+
+            with patch.dict(
+                REPOSITORY_MAP,
+                {"py_tools_for_hw": py_tools_spec},
+            ):
+                tool_root, archive = build_release(
+                    "1.0.0",
+                    temporary_root / "out",
+                    create_archive=False,
+                    repository_refs={
+                        "py_tools_for_hw": "v1.0.0",
+                        "com": com_commit,
+                    },
+                    official=True,
+                )
+
+            self.assertIsNone(archive)
+            self.assertTrue((tool_root / "TAGGED_SOURCE.txt").is_file())
+            metadata = tomllib.loads(
+                (tool_root / "release_info.toml").read_text(encoding="utf-8")
+            )
+            self.assertTrue(metadata["release"]["official"])
+            self.assertEqual(
+                metadata["repository"]["py_tools_for_hw"]["commit"],
+                py_tools_commit,
+            )
+            self.assertEqual(
+                metadata["repository"]["py_tools_for_hw"]["ref_kind"],
+                "tag",
+            )
+            self.assertEqual(metadata["repository"]["com"]["commit"], com_commit)
+            self.assertEqual(
+                metadata["repository"]["com"]["ref_kind"],
+                "commit",
+            )
+            self.assertFalse(metadata["repository"]["com"]["dirty"])
+
+    def test_official_release_rejects_branch_ref(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            source = Path(temporary_directory) / "py_tools_for_hw"
+            initialize_repository(source)
+            (source / "README.md").write_text("# source\n", encoding="utf-8")
+            commit_repository(source)
+            spec = replace(
+                REPOSITORY_MAP["py_tools_for_hw"],
+                repository=source.as_uri(),
+            )
+            with self.assertRaisesRegex(ValueError, "existing tag or full"):
+                with resolve_external_repository(
+                    spec,
+                    "main",
+                    None,
+                    shallow=False,
+                    require_immutable_ref=True,
+                ):
+                    pass
 
 
 if __name__ == "__main__":

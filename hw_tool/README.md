@@ -157,10 +157,11 @@ hw_tool.cmd de csr_tool -i register.md --nested -o out
         └── ...
 ```
 
-构建时，`mem_tool` 默认从注册表中的 `com` Git URL 拉取。可通过 `--repo-ref com=<tag|branch|commit>` 固定其版本；离线环境可改用 `--repo-path com=<checkout>`。以下命令同时生成源码目录和版本化 modulefile：
+开发构建默认使用当前 `py_tools_for_hw` 工作区和 `com@main`。正式构建通过 `--official` 为两个仓库分别指定 tag 或完整 commit，两边都从 URL clone，不使用当前工作区内容。以下命令同时生成源码目录和版本化 modulefile：
 
 ```bash
-python3 -B hw_tool/publish/build_release.py --version 0.1.0 --repo-ref com=v1.2.0 --no-archive
+python3 -B hw_tool/publish/build_release.py --version 0.1.0 --official \
+    --repo-ref py_tools_for_hw=v0.1.0 --repo-ref com=v1.2.0 --no-archive
 sudo mkdir -p /tools/hw_tool/0.1.0 /tools/modulefiles/hw_tool
 sudo cp -a hw_tool/publish/out/hw_tool-0.1.0/hw_tool /tools/hw_tool/0.1.0/
 sudo cp hw_tool/publish/out/hw_tool-0.1.0/modulefiles/hw_tool/0.1.0 /tools/modulefiles/hw_tool/0.1.0
@@ -198,7 +199,7 @@ module unload hw_tool/0.1.0
 | --------------------------------- | ------------------------------------------------- |
 | `hw_tool --version`               | 显示当前 hub 的 Git tag/commit、提交日期时间与 dirty 状态 |
 | `hw_tool doctor`                  | 检查 Python、Git、PATH、注册项、依赖和子 group 状态 |
-| `hw_tool verify [group|--all]`    | 快速检查各 group 的工具契约与注册完整性          |
+| `hw_tool verify [group\|--all]`   | 快速检查各 group 的工具契约与注册完整性          |
 | `hw_tool test --all`              | 发布前汇总执行各 group 的完整回归                |
 | `hw_tool list`                    | 列出已注册小组 hub 及其可用状态                    |
 | `hw_tool list --tools`            | 查询全部已就绪 group，列出全局工具索引             |
