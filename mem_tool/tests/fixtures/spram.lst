@@ -1,0 +1,13 @@
+spram1024x128           Warning: can't find wrapper;   top.aa
+spram1024x128x2         Warning: can't find wrapper;   top.aa.bb
+spram1024x128x2_usr1    Warning: can't find wrapper;   top.aa.bb
+spram200x100x5_usr10    Warning: can't find wrapper;   top.aa.bb
+spram1024x128           Warning: can't find wrapper;   top.aa.bb
+spram1024x128           Warning: can't find wrapper;   top.aa.bb.cc
+
+tpram1ck600x128           Warning: can't find wrapper;   top.aa
+tpram1ck600x128x2         Warning: can't find wrapper;   top.aa.bb
+tpram1ck200x100x5_usr10   Warning: can't find wrapper;   top.aa.bb
+
+tpram2ck512x128           Warning: can't find wrapper;   top.aa
+sprom400x100              Warning: can't find wrapper;   top.aa

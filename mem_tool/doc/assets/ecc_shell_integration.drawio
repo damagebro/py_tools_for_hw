@@ -1,0 +1,274 @@
+<mxfile host="Electron" agent="Codex">
+  <diagram id="ecc-shell-integration" name="ecc_shell_integration">
+    <mxGraphModel dx="2054" dy="1210" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="620" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="3" parent="1" style="rounded=1;arcSize=2;whiteSpace=wrap;html=1;strokeWidth=3;strokeColor=#17365d;fillColor=#ffffff;" value="" vertex="1">
+          <mxGeometry height="340" width="950" x="210" y="177" as="geometry" />
+        </mxCell>
+        <mxCell id="4" parent="1" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;fontSize=17;fontStyle=1;fontColor=#0f172a;" value="ecc_sram_shell" vertex="1">
+          <mxGeometry height="30" width="140" x="240" y="187" as="geometry" />
+        </mxCell>
+        <mxCell id="8" parent="1" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor=#1d4ed8;fillColor=#eff6ff;fontColor=#172554;fontSize=15;align=center;verticalAlign=middle;" value="&lt;b&gt;SRAM_SHELL&lt;/b&gt;" vertex="1">
+          <mxGeometry height="190" width="167" x="623" y="267" as="geometry" />
+        </mxCell>
+        <mxCell id="15" edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=3;strokeColor=#1d4ed8;endArrow=block;endFill=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="2pVAh5R20WKHqjYrNQon-31" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="408" y="354.71" as="sourcePoint" />
+            <mxPoint x="448" y="354.71" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-41" connectable="0" parent="15" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="wdata+&lt;div&gt;ecc_code&lt;/div&gt;" vertex="1">
+          <mxGeometry relative="1" x="-0.1092" as="geometry">
+            <mxPoint y="24" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="16" parent="1" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;fontSize=15;fontColor=#9a3412;fontStyle=1;" value="i_cfg_ecc_ctrl" vertex="1">
+          <mxGeometry height="30" width="140" x="56" y="213" as="geometry" />
+        </mxCell>
+        <mxCell id="21" parent="1" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeWidth=1;strokeColor=#64748b;fillColor=#ffffff;fontColor=#334155;fontSize=15;align=center;verticalAlign=middle;" value="Read latency = 1 + REQ_PIPE + RSP_PIPE cycles" vertex="1">
+          <mxGeometry height="50" width="940" x="220" y="467" as="geometry" />
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-24" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" value="&lt;div&gt;csr.&lt;/div&gt;mem_ctrl" vertex="1">
+          <mxGeometry height="60" width="120" x="640" y="103" as="geometry" />
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-25" parent="1" style="triangle;whiteSpace=wrap;html=1;" value="" vertex="1">
+          <mxGeometry height="40" width="30" x="640" y="119" as="geometry" />
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-54" edge="1" parent="1" source="2pVAh5R20WKHqjYrNQon-26" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="2pVAh5R20WKHqjYrNQon-29">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="130" y="237" />
+              <mxPoint x="1050" y="237" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-55" connectable="0" parent="2pVAh5R20WKHqjYrNQon-54" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="[0]=ecc_correct_n" vertex="1">
+          <mxGeometry relative="1" x="0.7949" y="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-26" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" value="&lt;div&gt;csr.&lt;/div&gt;ecc_ctrl" vertex="1">
+          <mxGeometry height="60" width="120" x="70" y="147" as="geometry" />
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-27" parent="1" style="triangle;whiteSpace=wrap;html=1;" value="" vertex="1">
+          <mxGeometry height="40" width="30" x="70" y="163" as="geometry" />
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-45" edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="2pVAh5R20WKHqjYrNQon-28">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="140" y="352" as="sourcePoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-46" connectable="0" parent="2pVAh5R20WKHqjYrNQon-45" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="i_wr_data" vertex="1">
+          <mxGeometry relative="1" x="-0.3646" as="geometry">
+            <mxPoint x="5" y="-10" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-28" parent="1" style="ellipse;shape=cloud;whiteSpace=wrap;html=1;" value="&lt;b style=&quot;color: rgb(67, 20, 7); font-size: 15px;&quot;&gt;ECC encode +&lt;/b&gt;&lt;div&gt;&lt;font color=&quot;#431407&quot;&gt;&lt;span style=&quot;font-size: 15px;&quot;&gt;&lt;b&gt;ERROR inject&lt;/b&gt;&lt;/span&gt;&lt;/font&gt;&lt;/div&gt;" vertex="1">
+          <mxGeometry height="110" width="160" x="250" y="297" as="geometry" />
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-43" edge="1" parent="1" source="2pVAh5R20WKHqjYrNQon-29" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1250" y="346" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-44" connectable="0" parent="2pVAh5R20WKHqjYrNQon-43" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="o_rd_data" vertex="1">
+          <mxGeometry relative="1" x="0.1429" y="2" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-50" edge="1" parent="1" source="2pVAh5R20WKHqjYrNQon-29" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1150" y="346" />
+              <mxPoint x="1150" y="407" />
+            </Array>
+            <mxPoint x="1250" y="407" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-51" connectable="0" parent="2pVAh5R20WKHqjYrNQon-50" style="edgeLabel;html=1;align=left;verticalAlign=middle;resizable=0;points=[];" value="o_pls_ecc_err[1:0]&lt;div&gt;[0]=CE warning&lt;/div&gt;&lt;div&gt;[1]=UE error&lt;/div&gt;" vertex="1">
+          <mxGeometry relative="1" x="0.3771" y="1" as="geometry">
+            <mxPoint x="-24" y="31" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-29" parent="1" style="ellipse;shape=cloud;whiteSpace=wrap;html=1;" value="&lt;b style=&quot;color: rgb(67, 20, 7); font-size: 15px;&quot;&gt;ECC decode&lt;/b&gt;" vertex="1">
+          <mxGeometry height="110" width="161" x="969" y="291" as="geometry" />
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-48" edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="2pVAh5R20WKHqjYrNQon-30">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="410" y="297" />
+              <mxPoint x="410" y="327" />
+            </Array>
+            <mxPoint x="140" y="297" as="sourcePoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-49" connectable="0" parent="2pVAh5R20WKHqjYrNQon-48" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="i_wr_req/i_rd_req/&lt;span style=&quot;background-color: light-dark(#ffffff, var(--ge-dark-color, #121212)); color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;i_addr&lt;/span&gt;" vertex="1">
+          <mxGeometry relative="1" x="-0.8525" y="1" as="geometry">
+            <mxPoint x="29" y="-19" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-30" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="&lt;div&gt;REQ_PIPE&lt;/div&gt;&lt;div&gt;(0=bypass)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="460" y="319" as="geometry" />
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-31" parent="1" style="triangle;whiteSpace=wrap;html=1;" value="" vertex="1">
+          <mxGeometry height="40" width="30" x="460" y="335" as="geometry" />
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-32" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="&lt;div&gt;RSP_PIPE&lt;/div&gt;&lt;div&gt;(0=bypass)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="830" y="322" as="geometry" />
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-33" parent="1" style="triangle;whiteSpace=wrap;html=1;" value="" vertex="1">
+          <mxGeometry height="40" width="30" x="830" y="338" as="geometry" />
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-39" edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=3;strokeColor=#1d4ed8;endArrow=block;endFill=1;" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="790" y="356.76" as="sourcePoint" />
+            <mxPoint x="830" y="356.76" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-40" edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=3;strokeColor=#1d4ed8;endArrow=block;endFill=1;" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="580" y="351.86" as="sourcePoint" />
+            <mxPoint x="620" y="351.86" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-42" edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=3;strokeColor=#1d4ed8;endArrow=block;endFill=1;" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="950" y="351.83" as="sourcePoint" />
+            <mxPoint x="990" y="351.83" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-52" edge="1" parent="1" source="2pVAh5R20WKHqjYrNQon-24" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.457;entryY=0.01;entryDx=0;entryDy=0;entryPerimeter=0;" target="8">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-53" edge="1" parent="1" source="2pVAh5R20WKHqjYrNQon-26" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.525;entryY=0.115;entryDx=0;entryDy=0;entryPerimeter=0;" target="2pVAh5R20WKHqjYrNQon-28">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="130" y="237" />
+              <mxPoint x="334" y="237" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-56" connectable="0" parent="2pVAh5R20WKHqjYrNQon-53" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="&lt;div&gt;[0]=ecc_correct_n,&lt;/div&gt;[1]=ecc_inject_en,&lt;div&gt;[3:2]=ecc_inject_val&lt;/div&gt;" vertex="1">
+          <mxGeometry relative="1" x="0.7095" as="geometry">
+            <mxPoint x="46" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-57" parent="1" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeWidth=1;strokeColor=#64748b;fillColor=#ffffff;fontColor=#334155;fontSize=15;align=center;verticalAlign=middle;" value="SRAM latency = 1 cycle" vertex="1">
+          <mxGeometry height="50" width="168.75" x="622.25" y="406" as="geometry" />
+        </mxCell>
+        <mxCell id="2pVAh5R20WKHqjYrNQon-58" parent="1" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;fontSize=15;fontColor=#9a3412;fontStyle=1;" value="i_cfg_mem_ctrl" vertex="1">
+          <mxGeometry height="30" width="130" x="634" y="186" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="ecc-shell-integration-gpt" name="ecc_shell_integration_gpt">
+    <mxGraphModel dx="1600" dy="760" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="760" math="0" shadow="0">
+      <root>
+        <mxCell id="g2_0"/>
+        <mxCell id="g2_1" parent="g2_0"/>
+        <mxCell id="g2_title" value="ECC SRAM Shell Integration" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;fontSize=24;fontStyle=1;fontColor=#111827;" vertex="1" parent="g2_1">
+          <mxGeometry x="550" y="15" width="500" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="g2_boundary" value="" style="rounded=1;arcSize=2;whiteSpace=wrap;html=1;strokeWidth=3;strokeColor=#17365d;fillColor=#ffffff;" vertex="1" parent="g2_1">
+          <mxGeometry x="100" y="155" width="1400" height="465" as="geometry"/>
+        </mxCell>
+        <mxCell id="g2_boundary_label" value="ecc_sram_shell" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;fontSize=18;fontStyle=1;fontColor=#17365d;" vertex="1" parent="g2_1">
+          <mxGeometry x="125" y="168" width="190" height="30" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="g2_csr_ecc" value="&lt;b&gt;csr.ecc_ctrl&lt;/b&gt;&lt;br&gt;ECC correction / injection" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor=#b85450;fillColor=#f8cecc;fontColor=#7f1d1d;fontSize=14;align=center;verticalAlign=middle;" vertex="1" parent="g2_1">
+          <mxGeometry x="170" y="65" width="230" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="g2_csr_mem" value="&lt;b&gt;csr.mem_ctrl&lt;/b&gt;&lt;br&gt;SRAM PHY configuration" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor=#b85450;fillColor=#f8cecc;fontColor=#7f1d1d;fontSize=14;align=center;verticalAlign=middle;" vertex="1" parent="g2_1">
+          <mxGeometry x="690" y="65" width="230" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="g2_encode" value="&lt;b&gt;ECC encode&lt;/b&gt;&lt;br&gt;&lt;b&gt;+ error inject&lt;/b&gt;&lt;br&gt;&lt;br&gt;generate ECC code&lt;br&gt;pack physical write row" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor=#c2410c;fillColor=#fff7ed;fontColor=#431407;fontSize=15;align=center;verticalAlign=middle;" vertex="1" parent="g2_1">
+          <mxGeometry x="260" y="245" width="220" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="g2_req_pipe" value="&lt;b&gt;REQ_PIPE&lt;/b&gt;&lt;br&gt;regslice&lt;br&gt;&lt;font style=&quot;font-size: 12px;&quot;&gt;0: bypass&lt;br&gt;1: DFF&lt;/font&gt;" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor=#7c3aed;fillColor=#f5f3ff;fontColor=#3b0764;fontSize=14;align=center;verticalAlign=middle;" vertex="1" parent="g2_1">
+          <mxGeometry x="560" y="325" width="110" height="95" as="geometry"/>
+        </mxCell>
+        <mxCell id="g2_sram_shell" value="&lt;b&gt;SRAM_SHELL&lt;/b&gt;&lt;br&gt;&lt;br&gt;physical row storage&lt;br&gt;SRAM PHY&lt;br&gt;&lt;br&gt;read latency = 1 cycle" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor=#1d4ed8;fillColor=#eff6ff;fontColor=#172554;fontSize=15;align=center;verticalAlign=middle;" vertex="1" parent="g2_1">
+          <mxGeometry x="735" y="260" width="230" height="190" as="geometry"/>
+        </mxCell>
+        <mxCell id="g2_rsp_pipe" value="&lt;b&gt;RSP_PIPE&lt;/b&gt;&lt;br&gt;regslice&lt;br&gt;&lt;font style=&quot;font-size: 12px;&quot;&gt;0: bypass&lt;br&gt;1: DFF&lt;/font&gt;" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor=#7c3aed;fillColor=#f5f3ff;fontColor=#3b0764;fontSize=14;align=center;verticalAlign=middle;" vertex="1" parent="g2_1">
+          <mxGeometry x="1030" y="325" width="110" height="95" as="geometry"/>
+        </mxCell>
+        <mxCell id="g2_decode" value="&lt;b&gt;ECC decode&lt;/b&gt;&lt;br&gt;&lt;br&gt;detect / correct&lt;br&gt;unpack physical row" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;strokeWidth=2;strokeColor=#c2410c;fillColor=#fff7ed;fontColor=#431407;fontSize=15;align=center;verticalAlign=middle;" vertex="1" parent="g2_1">
+          <mxGeometry x="1205" y="280" width="210" height="150" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="g2_input_wr_data" value="i_wr_data" style="text;html=1;align=right;verticalAlign=middle;resizable=0;points=[];autosize=1;fontSize=15;fontColor=#0f172a;" vertex="1" parent="g2_1">
+          <mxGeometry x="20" y="285" width="140" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="g2_input_req" value="i_wr_req / i_rd_req / i_addr" style="text;html=1;align=right;verticalAlign=middle;resizable=0;points=[];autosize=1;fontSize=15;fontColor=#0f172a;" vertex="1" parent="g2_1">
+          <mxGeometry x="20" y="420" width="250" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="g2_output_data" value="o_rd_data" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;fontSize=15;fontColor=#0f172a;" vertex="1" parent="g2_1">
+          <mxGeometry x="1450" y="310" width="120" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="g2_output_err" value="o_pls_ecc_err[1:0]&lt;br&gt;&lt;font style=&quot;font-size: 12px;&quot;&gt;[0]: CE warning&lt;br&gt;[1]: UE error&lt;/font&gt;" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;fontSize=15;fontColor=#0f172a;" vertex="1" parent="g2_1">
+          <mxGeometry x="1450" y="400" width="150" height="65" as="geometry"/>
+        </mxCell>
+        <mxCell id="g2_ecc_encode_label" value="i_cfg_ecc_ctrl[3:0]" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;fontSize=13;fontColor=#7f1d1d;" vertex="1" parent="g2_1">
+          <mxGeometry x="225" y="205" width="170" height="25" as="geometry"/>
+        </mxCell>
+        <mxCell id="g2_mem_ctrl_label" value="i_cfg_mem_ctrl" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;fontSize=13;fontColor=#7f1d1d;" vertex="1" parent="g2_1">
+          <mxGeometry x="760" y="205" width="160" height="25" as="geometry"/>
+        </mxCell>
+        <mxCell id="g2_ecc_decode_label" value="[0]: ecc_correct_n" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;fontSize=13;fontColor=#7f1d1d;" vertex="1" parent="g2_1">
+          <mxGeometry x="1125" y="205" width="170" height="25" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="g2_latency" value="Read latency = 1 + REQ_PIPE + RSP_PIPE cycles" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeWidth=1;strokeColor=#64748b;fillColor=#ffffff;fontColor=#334155;fontSize=15;align=center;verticalAlign=middle;" vertex="1" parent="g2_1">
+          <mxGeometry x="390" y="525" width="820" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="g2_wr_data_edge" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;strokeColor=#334155;endArrow=block;endFill=1;entryX=0;entryY=0.38;" edge="1" parent="g2_1" source="g2_input_wr_data" target="g2_encode">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="g2_encoded_edge" value="write data + ECC code" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=3;strokeColor=#1d4ed8;fontColor=#1e3a8a;fontSize=13;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.30;" edge="1" parent="g2_1" source="g2_encode" target="g2_req_pipe">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="g2_req_edge" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;strokeColor=#334155;endArrow=block;endFill=1;entryX=0;entryY=0.78;" edge="1" parent="g2_1" source="g2_input_req" target="g2_req_pipe">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="g2_req_to_ram" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=3;strokeColor=#1d4ed8;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="g2_1" source="g2_req_pipe" target="g2_sram_shell">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="g2_ram_to_rsp" value="physical read row" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=3;strokeColor=#1d4ed8;fontColor=#1e3a8a;fontSize=13;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="g2_1" source="g2_sram_shell" target="g2_rsp_pipe">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="g2_rsp_to_decode" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=3;strokeColor=#1d4ed8;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="g2_1" source="g2_rsp_pipe" target="g2_decode">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="g2_decode_data_edge" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;strokeColor=#334155;endArrow=block;endFill=1;exitX=1;exitY=0.35;entryX=0;entryY=0.5;" edge="1" parent="g2_1" source="g2_decode" target="g2_output_data">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="g2_decode_err_edge" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;strokeColor=#334155;endArrow=block;endFill=1;exitX=1;exitY=0.72;entryX=0;entryY=0.5;" edge="1" parent="g2_1" source="g2_decode" target="g2_output_err">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="g2_ecc_to_encode" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;strokeColor=#b85450;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.35;entryY=0;" edge="1" parent="g2_1" source="g2_csr_ecc" target="g2_encode">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="g2_ecc_to_decode" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;strokeColor=#b85450;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0.5;entryY=0;" edge="1" parent="g2_1" source="g2_csr_ecc" target="g2_decode">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="475" y="185"/>
+              <mxPoint x="1310" y="185"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="g2_mem_to_ram" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;strokeColor=#b85450;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="g2_1" source="g2_csr_mem" target="g2_sram_shell">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
