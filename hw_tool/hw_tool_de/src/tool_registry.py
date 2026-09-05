@@ -45,13 +45,6 @@ REPOSITORY_SPECS = (
         checkout="../repository/py_tools_for_hw",
         workspace="../..",
     ),
-    RepositorySpec(
-        name="com",
-        repository="https://github.com/damagebro/com.git",
-        branch="main",
-        checkout="../repository/com",
-        workspace="../../../com",
-    ),
 )
 
 REPOSITORY_MAP = {repository.name: repository for repository in REPOSITORY_SPECS}
@@ -61,13 +54,18 @@ HUB_ID = "py_tools_for_hw.de"
 TOOL_SPECS = (
     ToolSpec(
         name="mem_tool",
-        script="impl_template/memory/mem_tool/src/main.py",
+        script="mem_tool/src/main.py",
         description="Generate memory shells, reports, and integration RTL.",
         usage="hw_tool de mem_tool [options]",
-        doc_url="https://github.com/damagebro/com/blob/main/impl_template/memory/mem_tool/README.md",
-        readme="impl_template/memory/mem_tool/README.md",
-        repository_name="com",
-        contract_enabled=False,
+        doc_url="https://github.com/damagebro/py_tools_for_hw/blob/main/mem_tool/README.md",
+        readme="mem_tool/README.md",
+        repository_name="py_tools_for_hw",
+        doctor_packages=("openpyxl",),
+        example="mem_tool/tests/fixtures/spram.lst",
+        smoke_args=("-p", "smoke", "-m", "init", "-w", "{output}"),
+        smoke_outputs=("smoke_spram_shell.sv",),
+        unit_tests=("mem_tool/tests/test_mem_tool.py",),
+        unit_cwd="mem_tool",
     ),
     ToolSpec(
         name="rtl_inst",

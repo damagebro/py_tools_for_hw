@@ -74,7 +74,7 @@ ToolSpec(
 
 `hw_tool` 是公司级工具 hub。它只负责发现和转发各小组的 `hw_tool_<group>`；各小组独立维护自己的注册表、业务工具和测试。
 
-当前已注册 `de` 小组。DE 工具按来源仓库统一注册：同属 `py_tools_for_hw` 的工具共享一个 Git URL 和 checkout，`mem_tool` 使用独立的 `com` Git 仓库。
+当前已注册 `de` 小组。包括 `mem_tool` 在内的 DE 工具均位于 `py_tools_for_hw`，共享一个 Git URL 和 checkout。
 
 ## 目录结构
 
@@ -95,7 +95,7 @@ hw_tool/
 
 ## DE 工具来源
 
-`csr_tool`、`rtl_inst`、`rtl_dummy` 和 `gen_tb` 共用 `py_tools_for_hw` Git URL；`mem_tool` 使用 `com` Git URL。`hw_tool de sync --all` 按来源仓库同步，同一仓库只同步一次。
+当前 DE 工具共用 `py_tools_for_hw` Git URL。`hw_tool de sync --all` 按来源仓库同步，同一仓库只同步一次。
 
 在 `py_tools_for_hw` 源仓库内开发时会优先使用当前工作区，不额外 clone 自身。`hw_tool_de` 独立部署后，父 hub 会传递统一的 `hw_tool/repository/` checkout 根目录；执行 `hw_tool sync --all` 即可拉取各工具来源仓库。
 
@@ -157,11 +157,11 @@ hw_tool.cmd de csr_tool -i register.md --nested -o out
         └── ...
 ```
 
-开发构建默认使用当前 `py_tools_for_hw` 工作区和 `com@main`。正式构建通过 `--official` 为两个仓库分别指定 tag 或完整 commit，两边都从 URL clone，不使用当前工作区内容。以下命令同时生成源码目录和版本化 modulefile：
+开发构建默认使用当前 `py_tools_for_hw` 工作区。正式构建通过 `--official` 指定 `py_tools_for_hw` 的 tag 或完整 commit，并从 URL clone，不使用当前工作区内容。以下命令同时生成源码目录和版本化 modulefile：
 
 ```bash
 python3 -B hw_tool/publish/build_release.py --version 0.1.0 --official \
-    --repo-ref py_tools_for_hw=v0.1.0 --repo-ref com=v1.2.0 --no-archive
+    --repo-ref py_tools_for_hw=v0.1.0 --no-archive
 sudo mkdir -p /tools/hw_tool/0.1.0 /tools/modulefiles/hw_tool
 sudo cp -a hw_tool/publish/out/hw_tool-0.1.0/hw_tool /tools/hw_tool/0.1.0/
 sudo cp hw_tool/publish/out/hw_tool-0.1.0/modulefiles/hw_tool/0.1.0 /tools/modulefiles/hw_tool/0.1.0

@@ -30,9 +30,9 @@ class HwToolDeTest(unittest.TestCase):
         self.assertEqual(TOOL_MAP["md2html"].repository_name, "py_tools_for_hw")
         self.assertEqual(TOOL_MAP["git_repo_mgr"].repository_name, "py_tools_for_hw")
         self.assertEqual(TOOL_MAP["rtl_flist_mgr"].repository_name, "py_tools_for_hw")
-        self.assertEqual(TOOL_MAP["mem_tool"].repository_name, "com")
+        self.assertEqual(TOOL_MAP["mem_tool"].repository_name, "py_tools_for_hw")
         self.assertEqual(TOOL_MAP["csr_tool"].doctor_packages, ("jinja2", "openpyxl"))
-        self.assertFalse(TOOL_MAP["mem_tool"].contract_enabled)
+        self.assertEqual(TOOL_MAP["mem_tool"].doctor_packages, ("openpyxl",))
         for name in (
             "rtl_inst",
             "rtl_dummy",
@@ -41,6 +41,7 @@ class HwToolDeTest(unittest.TestCase):
             "md2html",
             "git_repo_mgr",
             "rtl_flist_mgr",
+            "mem_tool",
         ):
             tool = TOOL_MAP[name]
             self.assertTrue(tool.example)
@@ -92,7 +93,7 @@ class HwToolDeTest(unittest.TestCase):
         self.assertIn("md2html: contract", completed.stdout)
         self.assertIn("git_repo_mgr: contract", completed.stdout)
         self.assertIn("rtl_flist_mgr: contract", completed.stdout)
-        self.assertIn("mem_tool: externally maintained", completed.stdout)
+        self.assertIn("mem_tool: contract", completed.stdout)
 
     def test_sync_dry_run_is_non_mutating(self) -> None:
         completed = subprocess.run(
@@ -135,7 +136,7 @@ class HwToolDeTest(unittest.TestCase):
             r"^(?:workspace )?[0-9a-f]+(?: dirty)?$",
         )
 
-    def test_doc_prints_cross_repository_readme(self) -> None:
+    def test_doc_prints_mem_tool_readme(self) -> None:
         completed = subprocess.run(
             [sys.executable, "-B", "src/hw_tool_de.py", "doc", "mem_tool"],
             cwd=GROUP_ROOT,

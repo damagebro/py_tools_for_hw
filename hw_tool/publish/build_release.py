@@ -48,14 +48,12 @@ PY_TOOLS_PATHS = (
     "gen_rtl_dummy",
     "gen_rtl_inst",
     "git_repo_mgr",
+    "mem_tool",
     "py_md2html",
     "py_rtl_sim/gen_tb_demo",
     "rtl_flist_mgr",
 )
-EXTERNAL_REPOSITORY_PATHS = {
-    "com": ("impl_template/memory/mem_tool",),
-}
-REPOSITORY_NAMES = ("py_tools_for_hw", *EXTERNAL_REPOSITORY_PATHS)
+REPOSITORY_NAMES = ("py_tools_for_hw",)
 FULL_COMMIT_PATTERN = re.compile(r"[0-9a-fA-F]{40}")
 
 
@@ -94,23 +92,16 @@ def parse_args() -> argparse.Namespace:
         help="Select a repository branch, tag, or commit.",
     )
     parser.add_argument(
-        "--repo-path",
-        action="append",
-        default=[],
-        metavar="NAME=PATH",
-        help="Use a local repository checkout instead of cloning its URL.",
-    )
-    parser.add_argument(
         "--shallow",
         action="store_true",
-        help="Fetch only the selected external repository revision.",
+        help="Fetch only the selected official repository revision.",
     )
     parser.add_argument(
         "--official",
         action="store_true",
         help=(
-            "Build both py_tools_for_hw and com from explicitly selected "
-            "tags or full commits."
+            "Build py_tools_for_hw from an explicitly selected tag or "
+            "full commit."
         ),
     )
     parser.add_argument(
@@ -244,7 +235,6 @@ def classify_immutable_ref(repository: str, ref: str) -> str:
 def validate_release_sources(
     official: bool,
     repository_refs: Mapping[str, str],
-    repository_paths: Mapping[str, Path],
 ) -> None:
     if official:
         missing = [name for name in REPOSITORY_NAMES if name not in repository_refs]
@@ -252,18 +242,11 @@ def validate_release_sources(
             raise ValueError(
                 "--official requires --repo-ref for: " + ", ".join(missing)
             )
-        if repository_paths:
-            raise ValueError("--official does not allow --repo-path")
         return
 
     if "py_tools_for_hw" in repository_refs:
         raise ValueError(
             "py_tools_for_hw --repo-ref requires --official; development "
-            "release uses the current workspace"
-        )
-    if "py_tools_for_hw" in repository_paths:
-        raise ValueError(
-            "py_tools_for_hw --repo-path is not supported; development "
             "release uses the current workspace"
         )
 
@@ -415,14 +398,12 @@ def build_release(
     output_root: Path,
     create_archive: bool,
     repository_refs: Mapping[str, str] | None = None,
-    repository_paths: Mapping[str, Path] | None = None,
     shallow: bool = False,
     linux_install_root: str = "/tools/hw_tool",
     official: bool = False,
 ) -> tuple[Path, Path | None]:
     repository_refs = repository_refs or {}
-    repository_paths = repository_paths or {}
-    validate_release_sources(official, repository_refs, repository_paths)
+    validate_release_sources(official, repository_refs)
     release_root = output_root.resolve() / f"hw_tool-{version}"
     tool_root = release_root / "hw_tool"
 
@@ -440,50 +421,8 @@ def build_release(
                 )
             )
             repositories["py_tools_for_hw"] = py_tools_repository
-
-            selected_registry_path = (
-                py_tools_repository.root
-                / "hw_tool"
-                / "hw_tool_de"
-                / "src"
-                / "tool_registry.py"
-            )
-            try:
-                selected_registry = load_tool_registry(
-                    selected_registry_path,
-                    "_hw_tool_selected_release_registry",
-                )
-                selected_repository_map = selected_registry.REPOSITORY_MAP
-            except (AttributeError, ImportError, OSError) as exc:
-                raise ValueError(
-                    "cannot load repository registry from selected "
-                    f"py_tools_for_hw ref: {exc}"
-                ) from exc
-            if "com" not in selected_repository_map:
-                raise ValueError(
-                    "selected py_tools_for_hw ref does not register com"
-                )
-            com_spec = selected_repository_map["com"]
-            repositories["com"] = stack.enter_context(
-                resolve_external_repository(
-                    com_spec,
-                    repository_refs["com"],
-                    None,
-                    shallow,
-                    require_immutable_ref=True,
-                )
-            )
         else:
             repositories["py_tools_for_hw"] = workspace_repository()
-            com_spec = REPOSITORY_MAP["com"]
-            repositories["com"] = stack.enter_context(
-                resolve_external_repository(
-                    com_spec,
-                    repository_refs.get("com", com_spec.branch),
-                    repository_paths.get("com"),
-                    shallow,
-                )
-            )
 
         py_tools_root = repositories["py_tools_for_hw"].root
         source_hw_tool_root = py_tools_root / "hw_tool"
@@ -502,13 +441,6 @@ def build_release(
                 py_tools_root / relative_path,
                 repository_root / "py_tools_for_hw" / relative_path,
             )
-        for name, relative_paths in EXTERNAL_REPOSITORY_PATHS.items():
-            for relative_path in relative_paths:
-                copy_tree(
-                    repositories[name].root / relative_path,
-                    repository_root / name / relative_path,
-                )
-
         write_release_info(
             tool_root / "release_info.toml",
             version,
@@ -529,16 +461,11 @@ def main() -> int:
     args = parse_args()
     try:
         repository_refs = parse_named_values(args.repo_ref, "--repo-ref")
-        repository_paths = {
-            name: Path(value)
-            for name, value in parse_named_values(args.repo_path, "--repo-path").items()
-        }
         tool_root, archive_path = build_release(
             args.version,
             args.output_root,
             not args.no_archive,
             repository_refs=repository_refs,
-            repository_paths=repository_paths,
             shallow=args.shallow,
             linux_install_root=args.linux_install_root,
             official=args.official,

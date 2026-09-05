@@ -16,9 +16,9 @@ Windows PATH 与 Linux module load 共用 `build_release.py` 生成的离线源�
 
 ### 2.1 仓库来源
 
-构建命令只需在 `py_tools_for_hw` checkout 中运行。开发发布默认从当前 `py_tools_for_hw` 工作区复制工具，并根据 `hw_tool_de/src/tool_registry.py` 中登记的 `com` Git URL 获取 `main`，保留快速验证本地修改的方式。
+构建命令只需在 `py_tools_for_hw` checkout 中运行。开发发布默认从当前工作区复制 hub 和全部已注册工具，保留快速验证本地修改的方式。
 
-正式发布使用 `--official`，必须同时指定 `py_tools_for_hw` 和 `com` 的 tag 或完整 40 位 commit。两个仓库都会 clone 到临时目录，当前开发工作区即使 dirty 也不会进入发布包；`com` URL 优先从所选 `py_tools_for_hw` 版本的注册表读取。
+正式发布使用 `--official`，必须指定 `py_tools_for_hw` 的 tag 或完整 40 位 commit。仓库会 clone 到临时目录，当前开发工作区即使 dirty 也不会进入发布包。
 
 ### 2.2 固定源码版本
 
@@ -28,23 +28,18 @@ Windows PATH 与 Linux module load 共用 `build_release.py` 生成的离线源�
 python -B hw_tool/publish/build_release.py --version 1.1.1
 ```
 
-此时 `py_tools_for_hw` 使用当前工作区，`com` 默认使用 `main`。无网络或需要验证 `com` 本地修改时，可显式指定本地 checkout；`--repo-path` 的优先级高于 URL：
-
-```bash
-python -B hw_tool/publish/build_release.py --version 1.1.1 --repo-path com=path/to/com
-```
+此时直接使用当前 `py_tools_for_hw` 工作区，不访问远端仓库。
 
 正式发布示例：
 
 ```bash
 python -B hw_tool/publish/build_release.py --version 1.1.1 --official \
-    --repo-ref py_tools_for_hw=v1.1.1 \
-    --repo-ref com=v2.3.0
+    --repo-ref py_tools_for_hw=v1.1.1
 ```
 
-正式模式不接受 branch 或 `--repo-path`，也不会创建 tag；tag 由仓库维护者提前创建。两个 `--repo-ref` 均可替换为完整 40 位 commit。
+正式模式不接受 branch，也不会创建 tag；tag 由仓库维护者提前创建。`--repo-ref` 可替换为完整 40 位 commit。
 
-构建产物中的 `release_info.toml` 会记录 `official`、各仓库 URL、ref 类型、实际 commit、来源方式和 dirty 状态。开发模式使用 `--repo-path` 时不会切换或修改本地 checkout，ref 记录为 `working-tree`。
+构建产物中的 `release_info.toml` 会记录 `official`、仓库 URL、ref 类型、实际 commit、来源方式和 dirty 状态。开发模式记录当前 workspace 和 dirty 状态。
 
 ### 2.3 安装 Python 依赖
 
@@ -95,10 +90,11 @@ hw_tool/publish/out/
 └── hw_tool-0.4.0.zip
 ```
 
-外部仓库较大时可增加 `--shallow`，仅获取所选 ref 对应的浅层历史：
+正式发布可增加 `--shallow`，仅获取所选 ref 对应的浅层历史：
 
 ```bash
-python -B hw_tool/publish/build_release.py --version 0.4.0 --repo-ref com=main --shallow
+python -B hw_tool/publish/build_release.py --version 0.4.0 --official \
+    --repo-ref py_tools_for_hw=v0.4.0 --shallow
 ```
 
 只生成目录、不生成 zip：
