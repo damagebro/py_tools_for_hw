@@ -12,7 +12,7 @@ import stat
 import subprocess
 import sys
 import tempfile
-from contextlib import ExitStack, contextmanager
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -50,6 +50,7 @@ PY_TOOLS_PATHS = (
     "git_repo_mgr",
     "mem_tool",
     "py_md2html",
+    "py_rtl_snippet",
     "py_rtl_sim/gen_tb_demo",
     "rtl_flist_mgr",
 )
@@ -67,6 +68,8 @@ class ResolvedRepository:
     ref_kind: str
     commit: str
     dirty: bool
+    tag: str = ""
+    branch: str = ""
 
 
 def parse_args() -> argparse.Namespace:
@@ -168,6 +171,9 @@ def copy_tree(source: Path, destination: Path) -> None:
             "*.pyc",
             "_work",
             "out",
+            "build",
+            "tmp",
+            "node_modules",
         ),
     )
 
@@ -236,6 +242,9 @@ def validate_release_sources(
     official: bool,
     repository_refs: Mapping[str, str],
 ) -> None:
+    unknown = set(repository_refs) - set(REPOSITORY_NAMES)
+    if unknown:
+        raise ValueError("unknown repository: " + ", ".join(sorted(unknown)))
     if official:
         missing = [name for name in REPOSITORY_NAMES if name not in repository_refs]
         if missing:
@@ -309,7 +318,8 @@ def resolve_external_repository(
             if require_immutable_ref
             else "configured-ref"
         )
-        clone_repository(spec.repository, ref, root, shallow)
+        clone_ref = f"refs/tags/{ref}" if ref_kind == "tag" else ref
+        clone_repository(spec.repository, clone_ref, root, shallow)
         commit, dirty = repository_state(root)
         yield ResolvedRepository(
             name=spec.name,
@@ -320,6 +330,8 @@ def resolve_external_repository(
             ref_kind=ref_kind,
             commit=commit,
             dirty=dirty,
+            tag=ref if ref_kind == "tag" else "",
+            branch="",
         )
 
 
@@ -335,6 +347,7 @@ def workspace_repository() -> ResolvedRepository:
         ref_kind="working-tree",
         commit=commit,
         dirty=dirty,
+        branch=run_git(["branch", "--show-current"], SOURCE_ROOT),
     )
 
 
@@ -363,6 +376,8 @@ def write_release_info(
             f'ref = "{toml_string(repository.ref)}"',
             f'ref_kind = "{repository.ref_kind}"',
             f'commit = "{repository.commit}"',
+            f'tag = "{toml_string(repository.tag)}"',
+            f'branch = "{toml_string(repository.branch)}"',
             f"dirty = {str(repository.dirty).lower()}",
         ])
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -374,6 +389,8 @@ def write_linux_modulefile(
     linux_install_root: str,
 ) -> Path:
     install_root = linux_install_root.rstrip("/") or "/"
+    if not re.fullmatch(r"/[A-Za-z0-9_./ -]*", install_root):
+        raise ValueError("Linux install root must be an absolute path without Tcl metacharacters")
     tool_root = (
         f"/{version}/hw_tool"
         if install_root == "/"
@@ -384,13 +401,76 @@ def write_linux_modulefile(
     modulefile.write_text(
         "#%Module\n"
         f'module-whatis "Hardware development tool hub {version}"\n\n'
-        f"set root {tool_root}\n"
+        "conflict hw_tool\n"
+        f"set root {{{tool_root}}}\n"
         "prepend-path PATH $root/bin\n"
         "setenv HW_TOOL_HOME $root\n"
         f"setenv HW_TOOL_VERSION {version}\n",
-        encoding="utf-8",
+        encoding="utf-8", newline="\n",
     )
     return modulefile
+
+
+def validate_version(version: str) -> None:
+    number = r"(?:0|[1-9][0-9]*)"
+    identifier = r"(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+    pattern = rf"{number}\.{number}\.{number}(?:-{identifier}(?:\.{identifier})*)?"
+    if not re.fullmatch(pattern, version):
+        raise ValueError("version must be MAJOR.MINOR.PATCH with an optional SemVer prerelease")
+
+
+@contextmanager
+def release_staging(output_root: Path, version: str) -> Iterator[tuple[Path, Path]]:
+    validate_version(version)
+    output_root = output_root.resolve()
+    output_root.mkdir(parents=True, exist_ok=True)
+    destination = output_root / f"hw_tool-{version}"
+    lock = output_root / f".hw_tool-{version}.lock"
+    if destination.exists() or destination.is_symlink():
+        raise FileExistsError(f"release already exists: {destination}")
+    lock.mkdir()
+    try:
+        with tempfile.TemporaryDirectory(prefix=f".hw_tool-{version}-", dir=output_root) as temporary:
+            staged = Path(temporary) / destination.name
+            staged.mkdir()
+            yield staged, destination
+            if destination.exists() or destination.is_symlink():
+                raise FileExistsError(f"release already exists: {destination}")
+            staged.rename(destination)
+    finally:
+        lock.rmdir()
+
+
+@contextmanager
+def release_source(official: bool, refs: Mapping[str, str], shallow: bool) -> Iterator[ResolvedRepository]:
+    validate_release_sources(official, refs)
+    if official:
+        with resolve_external_repository(
+            REPOSITORY_MAP["py_tools_for_hw"], refs["py_tools_for_hw"], None,
+            shallow, require_immutable_ref=True,
+        ) as source:
+            yield source
+    else:
+        yield workspace_repository()
+
+
+def populate_release(source: ResolvedRepository, root: Path, version: str,
+                     official: bool, linux_install_root: str) -> Path:
+    source_hub = source.root / "hw_tool"
+    tool_root = root / "hw_tool"
+    shutil.copytree(source_hub, tool_root, ignore=make_hw_tool_copy_ignore(source_hub))
+    for relative_path in PY_TOOLS_PATHS:
+        copy_tree(source.root / relative_path, tool_root / "repository" / "py_tools_for_hw" / relative_path)
+    # Windows checkouts may have CRLF and no executable bit on Linux launchers.
+    for path in tool_root.rglob("*"):
+        if path.is_file() and (path.suffix == ".sh" or (not path.suffix and path.parent.name == "bin")):
+            content = path.read_bytes()
+            if content.startswith(b"#!"):
+                path.write_bytes(content.replace(b"\r\n", b"\n"))
+                path.chmod(0o755)
+    write_release_info(tool_root / "release_info.toml", version, [source], official)
+    write_linux_modulefile(root, version, linux_install_root)
+    return tool_root
 
 
 def build_release(
@@ -403,58 +483,18 @@ def build_release(
     official: bool = False,
 ) -> tuple[Path, Path | None]:
     repository_refs = repository_refs or {}
-    validate_release_sources(official, repository_refs)
-    release_root = output_root.resolve() / f"hw_tool-{version}"
-    tool_root = release_root / "hw_tool"
-
-    with ExitStack() as stack:
-        repositories: dict[str, ResolvedRepository] = {}
-        if official:
-            py_tools_spec = REPOSITORY_MAP["py_tools_for_hw"]
-            py_tools_repository = stack.enter_context(
-                resolve_external_repository(
-                    py_tools_spec,
-                    repository_refs["py_tools_for_hw"],
-                    None,
-                    shallow,
-                    require_immutable_ref=True,
-                )
-            )
-            repositories["py_tools_for_hw"] = py_tools_repository
-        else:
-            repositories["py_tools_for_hw"] = workspace_repository()
-
-        py_tools_root = repositories["py_tools_for_hw"].root
-        source_hw_tool_root = py_tools_root / "hw_tool"
-
-        if release_root.exists():
-            shutil.rmtree(release_root, onerror=remove_readonly)
-        shutil.copytree(
-            source_hw_tool_root,
-            tool_root,
-            ignore=make_hw_tool_copy_ignore(source_hw_tool_root),
-        )
-        repository_root = tool_root / "repository"
-
-        for relative_path in PY_TOOLS_PATHS:
-            copy_tree(
-                py_tools_root / relative_path,
-                repository_root / "py_tools_for_hw" / relative_path,
-            )
-        write_release_info(
-            tool_root / "release_info.toml",
-            version,
-            list(repositories.values()),
-            official,
-        )
-        write_linux_modulefile(release_root, version, linux_install_root)
-
-    archive_path = None
-    if create_archive:
-        archive_path = Path(
-            shutil.make_archive(str(release_root), "zip", root_dir=release_root)
-        )
-    return tool_root, archive_path
+    with release_staging(output_root, version) as (staged, destination):
+        with release_source(official, repository_refs, shallow) as source:
+            populate_release(source, staged, version, official, linux_install_root)
+        if create_archive:
+            from verify_release import write_checksums
+            from release import source_archive, write_documents
+            write_documents(staged / "hw_tool")
+            write_checksums(staged / "hw_tool")
+            source_archive(staged, version)
+            write_checksums(staged)
+    archive = destination / f"hw_tool-{version}.zip" if create_archive else None
+    return destination / "hw_tool", archive
 
 
 def main() -> int:

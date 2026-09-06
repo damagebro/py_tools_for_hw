@@ -1,311 +1,151 @@
-# hw_tool 三种发布方式
+# hw_tool 发布与使用
 
-本文说明 `hw_tool` 在 Windows PATH、Linux `module load` 和 VS Code `.vsix` 三种方式下的构建、部署、验证与升级过程。默认命令均从 `py_tools_for_hw` 仓库根目录执行，示例版本为 `0.4.0`。
+本文说明如何生成 `hw_tool 0.5.0` 发布包，以及发布后在 Windows、Linux 和 VS Code 中使用。命令默认在 `py_tools_for_hw` 仓库根目录执行。
 
-## 1. 发布方式概览
+## 1. 生成发布包
 
-| 发布方式          | 主要用户              | 交付产物                                      | 运行依赖                                      |
-| ----------------- | --------------------- | --------------------------------------------- | --------------------------------------------- |
-| Windows PATH      | Windows 命令行用户    | `hw_tool-<version>.zip` 或解压后的源码目录    | 系统 Python 3.11+ 和工具所需 Python 包        |
-| Linux module load | Linux/WSL/服务器用户  | 版本化源码目录和 Tcl modulefile               | Python 3.11+、Environment Modules/Lmod、Git   |
-| VS Code `.vsix`   | RTL 编辑器用户        | `dmg-hw-tool-<version>.vsix`                  | VS Code 1.85+、系统 Python 3.11+              |
+### 1.1 环境依赖
 
-Windows PATH 与 Linux module load 共用 `build_release.py` 生成的离线源码包。VSIX 会在打包时重新生成同一套独立 runtime，因此安装插件后不要求系统 PATH 中已有 `hw_tool`。
-
-## 2. 发布前准备
-
-### 2.1 仓库来源
-
-构建命令只需在 `py_tools_for_hw` checkout 中运行。开发发布默认从当前工作区复制 hub 和全部已注册工具，保留快速验证本地修改的方式。
-
-正式发布使用 `--official`，必须指定 `py_tools_for_hw` 的 tag 或完整 40 位 commit。仓库会 clone 到临时目录，当前开发工作区即使 dirty 也不会进入发布包。
-
-### 2.2 固定源码版本
-
-开发发布保持原有简化命令：
+发布脚本需要 Python 3.11+。各工具运行时还需要以下 Python 包：
 
 ```bash
-python -B hw_tool/publish/build_release.py --version 1.1.1
+python -m pip install jinja2 openpyxl Markdown PyYAML
 ```
 
-此时直接使用当前 `py_tools_for_hw` 工作区，不访问远端仓库。
+发布包不内置 Python。无网络环境应提前准备公共 Python venv 或内部 wheelhouse。
 
-正式发布示例：
+### 1.2 开发发布
+
+开发发布直接使用当前工作区，包括未提交修改，适合本地验证：
 
 ```bash
-python -B hw_tool/publish/build_release.py --version 1.1.1 --official \
-    --repo-ref py_tools_for_hw=v1.1.1
+python -B hw_tool/publish/release.py --version 0.5.0-dev.1
 ```
 
-正式模式不接受 branch，也不会创建 tag；tag 由仓库维护者提前创建。`--repo-ref` 可替换为完整 40 位 commit。
+### 1.3 正式发布
 
-构建产物中的 `release_info.toml` 会记录 `official`、仓库 URL、ref 类型、实际 commit、来源方式和 dirty 状态。开发模式记录当前 workspace 和 dirty 状态。
-
-### 2.3 安装 Python 依赖
-
-Windows 构建机或用户机：
-
-```powershell
-python --version
-python -m pip install jinja2 openpyxl Markdown
-```
-
-Linux 构建机或用户机：
+正式发布从注册的 Git URL 获取指定 tag，也可以指定完整的 40 位 commit ID：
 
 ```bash
-python3 --version
-python3 -m pip install --user jinja2 openpyxl Markdown
+python -B hw_tool/publish/release.py --version 0.5.0 --official \
+    --repo-ref py_tools_for_hw=v0.5.0
 ```
 
-`csr_tool` 使用 `jinja2/openpyxl`，`md2html` 使用 `Markdown`。仅调用不需要这些包的工具时，可以不安装对应依赖；执行 `hw_tool doctor` 可查看当前缺失项。
+正式发布不接受 branch。tag 需要提前创建，发布脚本不会创建或推送 tag。增加 `--shallow` 可以只获取所选版本的浅层历史。
 
-### 2.4 发布前检查
+Linux 安装位置不是默认的 `/tools/hw_tool` 时，需要在发布阶段指定实际路径：
 
 ```bash
-python -B hw_tool/src/hw_tool.py --version
-python -B hw_tool/src/hw_tool.py doctor
-python -B hw_tool/src/hw_tool.py verify
-python -B hw_tool/src/hw_tool.py test --all
+python -B hw_tool/publish/release.py --version 0.5.0 --official \
+    --repo-ref py_tools_for_hw=v0.5.0 \
+    --linux-install-root /opt/company/hw_tool
 ```
 
-### 2.5 生成离线源码包
-
-```bash
-python -B hw_tool/publish/build_release.py --version 0.4.0
-```
-
-生成结果：
+### 1.4 发布产物
 
 ```text
-hw_tool/publish/out/
-├── hw_tool-0.4.0/
-│   ├── hw_tool/
-│   │   ├── bin/
-│   │   ├── src/
-│   │   ├── repository/
-│   │   └── release_info.toml
-│   └── modulefiles/
-│       └── hw_tool/
-│           └── 0.4.0
-└── hw_tool-0.4.0.zip
+hw_tool/publish/out/hw_tool-0.5.0/
+├── hw_tool/                       # Windows/Linux 独立源码目录
+├── modulefiles/hw_tool/0.5.0      # Linux modulefile
+├── hw_tool-0.5.0.zip              # Windows/Linux 源码包
+├── dmg-hw-tool-0.5.0.vsix         # VS Code 插件
+└── SHA256SUMS                     # 完整性校验清单
 ```
 
-正式发布可增加 `--shallow`，仅获取所选 ref 对应的浅层历史：
+同一版本已存在时，发布脚本会拒绝覆盖。需要重新生成时，应先人工确认并处理旧产物，或使用新的版本号。
 
-```bash
-python -B hw_tool/publish/build_release.py --version 0.4.0 --official \
-    --repo-ref py_tools_for_hw=v0.4.0 --shallow
-```
+## 2. Windows 使用
 
-只生成目录、不生成 zip：
-
-```bash
-python -B hw_tool/publish/build_release.py --version 0.4.0 --no-archive
-```
-
-指定其他输出根目录：
-
-```bash
-python -B hw_tool/publish/build_release.py --version 0.4.0 --output-root path/to/release
-```
-
-## 3. Windows PATH 发布
-
-### 3.1 构建机交付
-
-将 `hw_tool/publish/out/hw_tool-0.4.0.zip` 交付给用户，也可以直接交付解压后的 `hw_tool-0.4.0/hw_tool/` 目录。
-
-### 3.2 用户部署
-
-将发布包解压到稳定且不会随意删除的目录，例如：
+将 `hw_tool-0.5.0.zip` 解压到稳定目录，例如：
 
 ```text
-C:\tools\hw_tool\0.4.0\hw_tool\
+C:\tools\hw_tool\0.5.0\hw_tool\
 ```
 
-进入发布目录，在 PowerShell 中永久加入当前用户 PATH：
+在 PowerShell 中将 `bin` 加入当前用户 PATH：
 
 ```powershell
-cd C:\tools\hw_tool\0.4.0\hw_tool
+cd C:\tools\hw_tool\0.5.0\hw_tool
 .\publish\windows\install_path.ps1 -HwToolRoot $PWD.Path
 ```
 
-只让当前 PowerShell 会话生效：
+重新打开 PowerShell 或 VS Code Terminal 后使用：
 
 ```powershell
-.\publish\windows\install_path.ps1 -HwToolRoot $PWD.Path -CurrentSessionOnly
-```
-
-永久修改 PATH 后需要重新打开 PowerShell 或 VS Code Terminal。
-
-### 3.3 验证
-
-```powershell
-Get-Command hw_tool.cmd
 hw_tool.cmd --version
-hw_tool.cmd doctor
 hw_tool.cmd list --tools
 hw_tool.cmd csr_tool --help
 ```
 
-### 3.4 升级与回退
+只在当前 PowerShell 生效时增加 `-CurrentSessionOnly`。升级或回退时保留各版本目录，只切换 PATH 指向。
 
-新版本应安装到新的版本目录，再把用户 PATH 中的旧 `hw_tool/bin` 替换为新路径。回退时恢复旧版本路径即可，不要覆盖旧版本目录。
+## 3. Linux module load 使用
 
-## 4. Linux module load 发布
+### 3.1 准备环境
 
-### 4.1 安装 module 命令
-
-Ubuntu/WSL：
+Ubuntu/WSL 示例：
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y environment-modules
-source /etc/profile.d/modules.sh
+sudo apt-get install -y environment-modules python3-venv unzip
+source /usr/share/modules/init/bash
 ```
 
-RHEL/Rocky Linux：
+已有 Lmod 或 Environment Modules 的服务器不需要重复安装。
+
+### 3.2 安装发布包
+
+以下示例对应默认安装根目录 `/tools/hw_tool`：
 
 ```bash
-sudo dnf install -y environment-modules
-source /etc/profile.d/modules.sh
-```
+sudo mkdir -p /tools/hw_tool/0.5.0
+sudo unzip -n hw_tool-0.5.0.zip -d /tools/hw_tool/0.5.0
 
-已有 Lmod 的服务器无需重复安装。
-
-### 4.2 部署源码目录
-
-在 Linux 构建机执行离线源码包命令后，将版本目录安装到共享工具路径：
-
-```bash
-python3 -B hw_tool/publish/build_release.py --version 0.4.0 --no-archive
-sudo mkdir -p /tools/hw_tool/0.4.0
-sudo cp -a hw_tool/publish/out/hw_tool-0.4.0/hw_tool /tools/hw_tool/0.4.0/
-sudo chmod +x /tools/hw_tool/0.4.0/hw_tool/bin/hw_tool
-```
-
-### 4.3 安装 modulefile
-
-`build_release.py` 会根据 `--version` 直接生成同名 modulefile。发布 `1.1.1` 时文件名、部署路径和 `HW_TOOL_VERSION` 都会自动使用 `1.1.1`，不需要再执行 `sed`：
-
-```bash
 sudo mkdir -p /tools/modulefiles/hw_tool
-sudo cp hw_tool/publish/out/hw_tool-0.4.0/modulefiles/hw_tool/0.4.0 /tools/modulefiles/hw_tool/0.4.0
+sudo cp /tools/hw_tool/0.5.0/modulefiles/hw_tool/0.5.0 \
+    /tools/modulefiles/hw_tool/0.5.0
 ```
 
-生成后的关键内容应为：
+每个版本使用独立目录，不覆盖旧版本。ZIP 已保存 Linux 启动脚本的执行权限和 LF 换行。
 
-```tcl
-#%Module
-module-whatis "Hardware development tool hub 0.4.0"
-
-set root /tools/hw_tool/0.4.0/hw_tool
-prepend-path PATH $root/bin
-setenv HW_TOOL_HOME $root
-setenv HW_TOOL_VERSION 0.4.0
-```
-
-如使用独立 Python venv，可以在 modulefile 中增加：
-
-```tcl
-setenv PYTHON /tools/hw_tool/0.4.0/venv/bin/python
-```
-
-Linux 启动器会优先使用 `PYTHON`，未设置时使用 `python3`。
-
-如果源码不是部署到默认的 `/tools/hw_tool`，构建时应同步指定安装根目录，生成的 modulefile 会直接写入该路径：
+### 3.3 加载和使用
 
 ```bash
-python3 -B hw_tool/publish/build_release.py --version 1.1.1 --linux-install-root /opt/company/hw_tool
-```
-
-### 4.4 用户加载与验证
-
-```bash
-source /etc/profile.d/modules.sh
 module use /tools/modulefiles
 module avail hw_tool
-module load hw_tool/0.4.0
-module list
+module load hw_tool/0.5.0
+
 hw_tool --version
-hw_tool doctor
 hw_tool list --tools
 hw_tool csr_tool --help
 ```
 
-退出当前版本：
+切换和卸载版本：
 
 ```bash
-module unload hw_tool/0.4.0
+module switch hw_tool/0.4.0 hw_tool/0.5.0
+module unload hw_tool/0.5.0
 ```
 
-切换版本：
+若使用公共 venv，可在调用前设置：
 
 ```bash
-module switch hw_tool/0.3.0 hw_tool/0.4.0
+export PYTHON=/tools/python/hw_tool/bin/python
 ```
 
-管理员可把 `/tools/modulefiles` 加入全局 `MODULEPATH`；个人或 WSL 验证环境也可以在 `~/.bashrc` 中初始化 Modules 后执行 `module use /tools/modulefiles`。
+启动器优先使用 `PYTHON`，未设置时使用 `python3`。
 
-## 5. VS Code VSIX 发布
+## 4. VS Code 使用
 
-### 5.1 构建机准备
-
-VSIX 构建需要 Python、Node.js 和 npm。当前打包脚本不依赖 `@vscode/vsce`，不需要联网下载 Node 包。
+安装统一发布生成的插件：
 
 ```bash
-python --version
-node --version
-npm --version
+code --install-extension dmg-hw-tool-0.5.0.vsix --force
 ```
 
-发布新版本前，需要同步修改 `hw_tool/publish/vscode/package.json` 中的 `version`，并确保 `package` 命令和输出文件名使用相同版本。
+也可以在 VS Code Extensions 页面选择 `Install from VSIX...`。插件已经内置 `hw_tool` 和各工具源码，不要求系统 PATH 中存在 `hw_tool`，但仍依赖系统 Python。
 
-### 5.2 一键检查与打包
-
-```bash
-cd hw_tool/publish/vscode
-npm run package
-```
-
-该命令依次执行：
-
-```text
-JavaScript 语法检查
-→ helper 测试
-→ 同步 py_rtl_snippet
-→ 生成内置 runtime/hw_tool
-→ 打包 VSIX
-```
-
-当前版本产物：
-
-```text
-hw_tool/publish/vscode/out/dmg-hw-tool-0.4.0.vsix
-```
-
-需要分步执行时：
-
-```bash
-python -B scripts/sync_resources.py
-python -B scripts/sync_runtime.py
-node test/test_helpers.js
-python -B scripts/pack_vsix.py --output out/dmg-hw-tool-0.4.0.vsix
-```
-
-### 5.3 用户安装
-
-命令行安装或覆盖已有版本：
-
-```bash
-code --install-extension hw_tool/publish/vscode/out/dmg-hw-tool-0.4.0.vsix --force
-```
-
-也可以在 VS Code Extensions 页面选择 `Install from VSIX...`，然后选择生成的文件。
-
-### 5.4 Python 设置与验证
-
-插件内置 `hw_tool` 和已注册工具源码，但不内置 Python。目标机应安装相应依赖，并在 VS Code 设置中配置实际解释器：
+需要指定 Python 路径时，在 VS Code 设置中填写：
 
 ```json
 {
@@ -313,40 +153,48 @@ code --install-extension hw_tool/publish/vscode/out/dmg-hw-tool-0.4.0.vsix --for
 }
 ```
 
-安装后在命令面板执行：
+安装后可以从命令面板执行 `HW Tool: Open Tool Documentation...`，查看并调用各工具。详细命令见 [VS Code 插件说明](publish/vscode/README.md)。
 
-```text
-HW Tool: Open Tool Documentation...
-HW Tool: Copy RTL Instance
-HW Tool: Create CSR Template...
-```
+## 5. 发布校验
 
-确认 Snippet 可用时，在 Verilog/SystemVerilog 文件中输入 `rtl-module` 或 `rtl-always_dff`。
+### 5.1 完整产物校验
 
-卸载插件：
+发布完成或交付前执行：
 
 ```bash
-code --uninstall-extension dmg.dmg-hw-tool
+python -B hw_tool/publish/verify_release.py \
+    hw_tool/publish/out/hw_tool-0.5.0
 ```
 
-## 6. 发布检查清单
+该命令检查：
 
-| 检查项               | Windows PATH | Linux module       | VSIX             |
-| -------------------- | ------------ | ------------------ | ---------------- |
-| 固定 Git tag/commit  | 必须         | 必须               | 必须             |
-| `hw_tool doctor`     | 必须         | 必须               | 建议             |
-| `hw_tool test --all` | 构建前       | 构建前             | runtime 同步前   |
-| Python 依赖          | 用户机安装   | 用户机或共享 venv  | 用户机安装       |
-| PATH/MODULEPATH      | PATH         | MODULEPATH         | 不需要           |
-| 独立工具源码         | 已内置       | 已内置             | 已内置           |
-| 升级方式             | 切换 PATH    | `module switch`    | 覆盖安装 VSIX    |
+- `SHA256SUMS` 与文件增删、内容变化；
+- 源码包、modulefile 和 VSIX 的版本一致性；
+- ZIP 与 VSIX 中的 Python runtime 是否一致；
+- Git commit/tag/branch/dirty 等来源信息；
+- Linux 启动脚本的执行权限和 LF 换行。
 
-三种发布方式都应从同一个 Git tag/commit 构建，并使用相同版本号。Windows/Linux 包中的 `release_info.toml` 与 VSIX 的 `package.json.version` 是离线环境核对版本的主要依据。
+解压并安装后，也可以只校验 `hw_tool/`：
 
-## 7. 相关文档
+```bash
+python -B /installed/hw_tool/publish/verify_release.py /installed/hw_tool
+```
 
-- [hw_tool 发布目录说明](publish/README.md)
-- [Windows PATH 发布](publish/windows/README.md)
-- [Linux module load 发布](publish/linux/README.md)
-- [VS Code 插件发布](publish/vscode/README.md)
-- [Linux/WSL/Docker 验证计划](../doc/plan_linux_module_release.md)
+校验失败返回非零。`SHA256SUMS` 可以发现拷贝损坏或普通修改，但不是数字签名；需要防止恶意篡改时，应配合只读制品库或独立签名。
+
+### 5.2 发布回归
+
+发布脚本基础回归：
+
+```bash
+python -B -m unittest discover -s hw_tool/test -p "test_*release.py"
+```
+
+Linux/WSL 可使用 [test_release.sh](publish/linux/test_release.sh) 对两个测试版本执行 `module load/switch/unload`、Python 依赖、全部注册工具 smoke 以及安装后校验。
+
+## 6. 相关文档
+
+- [发布脚本与参数](publish/README.md)
+- [Windows PATH 说明](publish/windows/README.md)
+- [Linux module load 说明](publish/linux/README.md)
+- [VS Code 插件说明](publish/vscode/README.md)

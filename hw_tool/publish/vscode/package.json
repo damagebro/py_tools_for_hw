@@ -312,6 +312,6 @@
         "test": "node test/test_helpers.js",
         "sync-snippets": "python scripts/sync_resources.py",
         "sync-runtime": "python scripts/sync_runtime.py",
-        "package": "npm run check && npm test && npm run sync-snippets && npm run sync-runtime && python scripts/pack_vsix.py --output out/dmg-hw-tool-0.4.0.vsix"
+        "package": "npm run check && npm test && npm run sync-snippets && npm run sync-runtime && python scripts/pack_vsix.py"
     }
 }

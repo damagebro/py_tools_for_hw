@@ -614,6 +614,17 @@ def git_state(tool: ToolSpec) -> tuple[str, str]:
     if not is_git_source:
         return "ready", ""
 
+    # Source releases deliberately omit .git; use the adjacent release metadata.
+    if repository is not None and path.parent.name == "repository" and not (path / ".git").exists():
+        try:
+            metadata = tomllib.loads((path.parent.parent / "release_info.toml").read_text(encoding="utf-8"))
+            source = metadata["repository"][repository.name]
+            commit = source["commit"]
+            if isinstance(commit, str) and len(commit) == 40 and all(c in "0123456789abcdef" for c in commit):
+                return "ready", f"release {commit[:7]}"
+        except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError):
+            pass
+
     try:
         commit = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
