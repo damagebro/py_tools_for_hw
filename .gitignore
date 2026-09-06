@@ -14,3 +14,4 @@ out/
 .test_work/
 _work/
 doc/plan_*
+*tmp*

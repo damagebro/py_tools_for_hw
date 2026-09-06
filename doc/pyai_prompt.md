@@ -70,6 +70,22 @@
 以上这些如何实现
 
 
+## vscode插件讨论
+
+| 工具                 | 准备情况 | 插件适合度 | 推荐交互                                                                                           |
+| -------------------- | -------- | ---------- | -------------------------------------------------------------------------------------------------- |
+| `常见代码片段`       | Y        |            | always@(clk), dff/comb/struct/union/enum                                                           |
+| `常见接口`           | Y        |            | vld&rdy, ram_if, csr_if, ebus/axi, apb_if                                                          |
+| `rtl_inst.common_ip` |          |            | 和dmg:common_ip联动                                                                                |
+| `??`                 |          | 很高       | (1)rtl_inst交互体验 y (2) csr_tool交互体验 y (3) mem_tool交互体验 y (4) rtl_dummy/gen_tb交互体验 y |
+| `rtl_inst`           |          | 很高       | 选中 RTL 路径后替换为例化片段；当前文件例化；common_ip 搜索后插入                                  |
+| `rtl_dummy`          |          | 高         | 当前 RTL 文件右键生成 `bbox/stub/port_swap`，生成后打开输出文件                                    |
+| `csr_tool`           |          | 中等       | 当前 Markdown 右键“生成 CSR”；完成后打开 `tree.html` / RTL / firmware                              |
+| `gen_tb`             |          | 中等       | 在 workspace 或 filelist 上执行“生成 TB 工程”，完成后在 Explorer 打开目录                          |
+| `rtl_flist_mgr`      |          | 中等偏高   | core TOML 右键生成 flist；`--list-core` 显示到专用 Tree View；错误跳转到 corefile                  |
+| `git_repo_mgr`       |          | 低         | 仅提供状态、同步、graph 打开等命令；危险的 tag/protect/release 仍推荐终端                          |
+| `mem_tool`           |          | 低到中等   | 若未来有参数表单再做；一期仅从命令面板调用即可;  mem_tool挪到py_tools;                             |
+
 
 # 新增工具
 
@@ -128,18 +144,16 @@ flist常见，  sim/synth/lint,  后面兼容emu/fpga再说，
 5. 如果root_dir下面, 既有core.toml, 也有normal.toml, 如何区分;  //y, 文件开头的[core]可区分
 6. flist去重
 
-| root_dir/
-|---|import/
-|---|---|cpu/
-|---|---|---|spram100x10.sv
-|---|---|npu/
-|---|---|---|spram100x10.sv   //不去重
+root_dir/
+└── import/
+    ├── cpu/
+    │   └── spram100x10.sv
+    └── npu/
+        └── spram100x10.sv  # 不去重
 
-| root_dir/
-|---|import/
-|---|---|com/
-|---|---|---|spram100x10.sv
-|---|---|cpu/  #depend com
-|---|---|npu/  #depend com
-
-
+root_dir/
+└── import/
+    ├── com/
+    │   └── spram100x10.sv
+    ├── cpu/  # depend com //去重
+    └── npu/  # depend com //去重
