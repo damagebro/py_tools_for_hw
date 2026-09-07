@@ -49,7 +49,26 @@ class PyRtlSnippetTest(unittest.TestCase):
         self.assertTrue(required <= prefixes)
         self.assertTrue(all(prefix.startswith("rtl-") for prefix in prefixes))
         self.assertFalse(any(prefix.endswith("-if") for prefix in prefixes))
+        self.assertIn("rtl-inst-com_arbiter_rr", prefixes)
+        self.assertIn("rtl-inst-com_sync_fifo_reg", prefixes)
         self.assertTrue(all(isinstance(item["body"], list) for item in snippets.values()))
+
+        common = snippets["RTL instance com_sync_fifo_reg"]
+        common_body = "\n".join(common["body"])
+        self.assertIn("${1:u_inst}_i_wr_data", common_body)
+        self.assertIn("${2:u_com_sync_fifo_reg_inst}", common_body)
+        self.assertNotIn("// Source:", common_body)
+        self.assertNotIn("C:\\personal", common_body)
+
+        fifo_1p1 = "\n".join(snippets["RTL instance com_sync_fifo_ram_1p1bank"]["body"])
+        self.assertIn("???_ram_shell #(", fifo_1p1)
+        self.assertIn(".DATA_W (RAM_ONE_DW", fifo_1p1)
+        self.assertNotIn("assign ${1:u_inst}_i_ram_rd_data = i_ram_rd_data", fifo_1p1)
+
+        fifo_1p2 = "\n".join(snippets["RTL instance com_sync_fifo_ram_1p2bank"]["body"])
+        self.assertIn(")u_com_spram_shell_fifo_ram[1:0]", fifo_1p2)
+        self.assertNotIn("[gi]", fifo_1p2)
+        self.assertIn(".o_rd_data      (${1:u_inst}_i_ram_rd_data ", fifo_1p2)
 
     def test_versioned_json_matches_markdown_source(self) -> None:
         self.assertEqual(

@@ -11,7 +11,8 @@
 | **通用功能**       | `HW Tool: Open Tool Documentation...`              | Python 环境依赖已安装              | 从已注册工具中选择 README，转换为 HTML 后在 Webview 中打开。                                            |
 |                    | `HW Tool: Change Preview Theme...`                 | 无                                 | 设置文档和 Markdown HTML 预览主题，可选 `Light`、`Dark` 或 `Follow VS Code`。                           |
 |                    | `HW Tool: Convert Markdown to HTML...`             | 当前文件为 `.md/.markdown`         | 选择是否生成目录，在 Markdown 同目录输出同名 `.html`，随后在 Webview 中打开；也可从编辑器右键菜单调用。 |
-| **py_rtl_snippet** | 输入 `rtl-` 前缀                                   | 当前文件为 `.v/.sv`                | 由 VS Code 原生补全列出代码片段，选中后按 `Tab` 展开。                                                  |
+|                    | `HW Tool: Preview Markdown as HTML...`             | 当前文件为 `.md/.markdown`         | 选择是否生成目录，直接在 Webview 中预览，不生成或覆盖任何 HTML 文件；也可从编辑器右键菜单调用。当前文件有未保存修改时先保存 Markdown。 |
+| **py_rtl_snippet** | 输入 `rtl-` 前缀                                   | 当前文件为 `.v/.sv`                | 由 VS Code 原生补全列出代码片段；`rtl-inst-<module>` 提供发布时固化的常用 `com` module 例化。           |
 | **rtl_inst**       | `HW Tool: Replace Selected RTL Path With Instance` | `.v/.sv` 中选中绝对 RTL 路径       | 调用 `rtl_inst --stdout`，成功后用 instance snippet 一次性替换选区；失败时选区保持不变。                |
 |                    | `HW Tool: Insert RTL Instance From File...`        | 当前文件为 `.v/.sv`                | 图形选择一个 `.v/.sv` 文件，在当前光标位置插入 instance snippet。                                       |
 |                    | `HW Tool: Copy RTL Instance`                       | 当前或 Explorer 选中 `.v/.sv`      | 自动使用当前文件或 Explorer 右键文件，生成 instance 并写入剪贴板，用户使用 `Ctrl+V` 粘贴。              |
@@ -44,7 +45,7 @@ CSR 模板优先生成到当前激活 Terminal 的工作目录。Terminal 未启
 python -B hw_tool/publish/vscode/scripts/sync_resources.py
 ```
 
-该步骤会把 `py_rtl_snippet` 的最新 Markdown 片段生成为 `resources/systemverilog.code-snippets`。CSR 模板由插件内置 runtime 调用 `csr_tool template` 动态生成，不再复制整份 `reg_template.md`。
+该步骤会把 `py_rtl_snippet` 的最新 Markdown 片段生成为 `resources/systemverilog.code-snippets`。其中 `rtl-inst` 表格在维护者本地读取同级 `com` 仓库，并通过 `gen_rtl_inst` 固化常用 module 例化；插件用户不访问 `com`。CSR 模板由插件内置 runtime 调用 `csr_tool template` 动态生成，不再复制整份 `reg_template.md`。
 
 生成插件内置 runtime：
 
@@ -97,4 +98,4 @@ npm run sync-runtime
 npm run package
 ```
 
-`npm run package` 会自动完成上述三个准备步骤。产物为 `out/dmg-hw-tool-0.4.0.vsix`。安装后，VS Code 会自行管理用户扩展目录；插件约 1 MB，仅依赖系统 Python。打包使用仓库内的 `scripts/pack_vsix.py`，不依赖 `@vscode/vsce` 或网络访问。
+`npm run package` 会自动完成上述三个准备步骤。产物为 `out/dmg-hw-tool-<version>.vsix`。安装后，VS Code 会自行管理用户扩展目录；插件约 1 MB，仅依赖系统 Python。打包使用仓库内的 `scripts/pack_vsix.py`，不依赖 `@vscode/vsce` 或网络访问。

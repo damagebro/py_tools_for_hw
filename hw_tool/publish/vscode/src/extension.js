@@ -297,7 +297,7 @@ async function activeMarkdownUri(resource) {
 }
 
 
-async function openMarkdownHtml(htmlPath, sourceDirectory) {
+async function openMarkdownHtml(htmlPath, sourceDirectory, htmlContent) {
     const panel = vscode.window.createWebviewPanel(
         "dmgHwTool.markdownHtml",
         path.basename(htmlPath),
@@ -311,7 +311,7 @@ async function openMarkdownHtml(htmlPath, sourceDirectory) {
         .asWebviewUri(vscode.Uri.file(sourceDirectory))
         .toString()
         .replace(/\/?$/, "/");
-    const document = await fs.readFile(htmlPath, "utf-8");
+    const document = htmlContent ?? await fs.readFile(htmlPath, "utf-8");
     panel.webview.html = document.replace(
         /<base href="[^"]*">/,
         `<base href="${assetRoot}">`
@@ -319,7 +319,7 @@ async function openMarkdownHtml(htmlPath, sourceDirectory) {
 }
 
 
-async function convertMarkdownToHtml(resource, output, context) {
+async function convertMarkdownToHtml(resource, output, context, previewOnly = false) {
     const sourceUri = await activeMarkdownUri(resource);
     if (!sourceUri) {
         return;
@@ -345,7 +345,7 @@ async function convertMarkdownToHtml(resource, output, context) {
 
     const sourcePath = sourceUri.fsPath;
     const outputPath = sourcePath.replace(/\.(md|markdown)$/i, ".html");
-    if (!(await confirmTemplateOverwrite(outputPath))) {
+    if (!previewOnly && !(await confirmTemplateOverwrite(outputPath))) {
         return;
     }
 
@@ -359,18 +359,17 @@ async function convertMarkdownToHtml(resource, output, context) {
             hwToolPath,
             "de",
             "md2html",
-            sourcePath,
-            "-o",
-            outputPath
+            sourcePath
         ];
+        args.push(...(previewOnly ? ["--stdout"] : ["-o", outputPath]));
         if (choice.toc) {
             args.push("--toc");
         }
         args.push("--theme", previewTheme(sourceUri));
-        await vscode.window.withProgress(
+        const result = await vscode.window.withProgress(
             {
                 location: vscode.ProgressLocation.Notification,
-                title: "Converting Markdown to HTML...",
+                title: previewOnly ? "Previewing Markdown as HTML..." : "Converting Markdown to HTML...",
                 cancellable: false
             },
             async () => {
@@ -380,17 +379,20 @@ async function convertMarkdownToHtml(resource, output, context) {
                     output,
                     ["markdown"]
                 );
-                await runProcess(
+                return runProcess(
                     pythonPath,
                     args,
                     sourceDirectory,
                     output,
-                    "md2html"
+                    "md2html",
+                    { echoStdout: !previewOnly }
                 );
             }
         );
-        await openMarkdownHtml(outputPath, sourceDirectory);
-        vscode.window.showInformationMessage(`HTML generated: ${outputPath}`);
+        await openMarkdownHtml(outputPath, sourceDirectory, previewOnly ? result.stdout : undefined);
+        if (!previewOnly) {
+            vscode.window.showInformationMessage(`HTML generated: ${outputPath}`);
+        }
     }
     catch (error) {
         output.appendLine(`[ERROR] ${error.message}`);
@@ -639,6 +641,10 @@ function activate(context) {
         vscode.commands.registerCommand(
             "dmgHwTool.md2html.convert",
             (resource) => convertMarkdownToHtml(resource, output, context)
+        ),
+        vscode.commands.registerCommand(
+            "dmgHwTool.md2html.preview",
+            (resource) => convertMarkdownToHtml(resource, output, context, true)
         ),
         vscode.commands.registerCommand("dmgHwTool.csr.generateSingle", () => generateCsr(false, output, context)),
         vscode.commands.registerCommand("dmgHwTool.csr.generateNested", () => generateCsr(true, output, context)),

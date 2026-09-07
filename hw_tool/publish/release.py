@@ -56,11 +56,27 @@ def prepare_extension(tool_root: Path, version: str) -> Path:
     package["version"] = version
     package_path.write_text(json.dumps(package, indent=4) + "\n", encoding="utf-8", newline="\n")
     snippets = tool_root / "repository/py_tools_for_hw/py_rtl_snippet"
-    subprocess.run([
-        sys.executable, "-B", str(snippets / "src/py_rtl_snippet.py"),
-        "-i", str(snippets / "input/rtl_snippets.md"),
-        "-o", str(extension / "resources/systemverilog.code-snippets"),
-    ], check=True)
+    snippet_source = load_tool_registry(
+        snippets / "src/py_rtl_snippet.py", "_release_snippet_source"
+    )
+    markdown = (snippets / "input/rtl_snippets.md").read_text(encoding="utf-8")
+    expected = {
+        f"rtl-inst-{row['module_name']}"
+        for row in snippet_source.rtl_inst_rows(markdown)
+    }
+    generated_path = snippets / "snippets/systemverilog.code-snippets"
+    generated = json.loads(generated_path.read_text(encoding="utf-8"))
+    actual = {str(item.get("prefix")) for item in generated.values() if isinstance(item, dict)}
+    missing = sorted(expected - actual)
+    if missing:
+        raise ValueError(
+            "generated common IP snippets are stale; refresh py_rtl_snippet: "
+            + ", ".join(missing)
+        )
+    shutil.copy2(
+        generated_path,
+        extension / "resources/systemverilog.code-snippets",
+    )
     return extension
 
 

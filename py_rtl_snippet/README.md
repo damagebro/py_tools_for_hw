@@ -6,12 +6,13 @@
 
 片段遵循 `doc/coding_style.md` 中的主要约定：模块名和信号名使用小写，参数名使用大写，默认时钟/复位信号为 `clk`/`rst_n`，RTL 注释使用英文，时序与组合逻辑使用 `always @`，端口和连接信号使用明确的方向语义。
 
-当前片段分为两类：
+当前片段分为三类：
 
 | 分类         | 内容范围                                                            |
 | ------------ | ------------------------------------------------------------------- |
 | RTL 语句片段 | 模块头、时序/组合逻辑、DFF、struct、union、enum。                   |
 | 总线端口片段 | Valid-ready、RAM、CSR、eBus、APB、AXI4 的 `input/output` 端口组。  |
+| RTL 例化片段 | 从 `com` 仓库选取的常用 module，由 `gen_rtl_inst` 自动生成。       |
 
 总线片段不生成 `interface` 或 `modport`，可直接插入 module 的端口列表。时钟与复位通常已经由 `rtl-module` 提供，因此总线片段只列出协议自身的数据信号和握手信号。
 
@@ -35,7 +36,7 @@ python -B src/py_rtl_snippet.py -o snippets/systemverilog.code-snippets
 
 ## Markdown 格式
 
-每个片段以 `## <prefix>` 开始；其下可选填写 `title`、`description`、`scope`，并放入一个 `systemverilog` 代码块。直接编辑代码块后重新运行生成命令即可。
+普通片段以 `## <prefix>` 开始；其下可选填写 `title`、`description`、`scope`，并放入一个 `systemverilog` 代码块。直接编辑代码块后重新运行生成命令即可。
 
 ````markdown
 ## rtl-example
@@ -48,6 +49,8 @@ python -B src/py_rtl_snippet.py -o snippets/systemverilog.code-snippets
 assign ${1:o_data} = ${2:i_data};${0}
 ```
 ````
+
+`## rtl-inst` 是 common IP 例化清单，表格维护 `module_name`、相对 `com` 仓库根目录的 `rtl_path` 和说明。刷新时脚本复用同仓库的 `gen_rtl_inst` 解析 RTL，生成 `rtl-inst-<module_name>` 前缀。生成的 JSON 纳入 Git 并随 VSIX 发布，最终用户不需要访问 `com` 仓库。
 
 ## 常用前缀
 
@@ -68,6 +71,7 @@ assign ${1:o_data} = ${2:i_data};${0}
 | `rtl-ebus_wrport`            | eBus 写请求/响应端口组。                      |
 | `rtl-apb_port`               | APB slave 端口组。                            |
 | `rtl-axi4_port`              | AXI4 slave 五通道端口组。                     |
+| `rtl-inst-<module_name>`     | 常用 `com` module 的离线例化代码。             |
 
 ## 命令行工具
 
@@ -82,6 +86,16 @@ python -B src/py_rtl_snippet.py -i path/to/custom_snippets.md -o out/custom.code
 ```
 
 `-i` 指定人工维护的 Markdown 输入，默认是 `input/rtl_snippets.md`。`-o` 会在需要时创建父目录，并以 UTF-8 写入生成的 JSON。
+
+默认从 `py_tools_for_hw` 同级的 `com` 仓库生成例化片段；其他目录可显式指定：
+
+```bash
+python -B src/py_rtl_snippet.py \
+    --common-root path/to/com \
+    -o snippets/systemverilog.code-snippets
+```
+
+维护者只有在刷新 common IP snippet 时需要本地 `com` 仓库。统一正式发布直接打包版本受控的 `snippets/systemverilog.code-snippets`，不在发布现场重新访问 `com`。
 
 `--preview` 将所有片段按默认占位符展开为一个 `.sv` 文件，用于人工检查。时序/组合逻辑片段保持纯 `always` 块，总线片段保持纯参数和端口声明，均不额外包裹 module。因此该文件仅是片段预览，不应加入实际 RTL filelist 或作为完整 RTL 编译。
 

@@ -86,6 +86,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Output HTML file (default: input filename with .html suffix)",
     )
     parser.add_argument("--title", help="Override the HTML page title")
+    parser.add_argument("--stdout", action="store_true", help="Print HTML without creating a file")
     parser.add_argument(
         "--toc",
         action="store_true",
@@ -111,7 +112,8 @@ def convert_markdown(
     title: str | None = None,
     include_toc: bool = False,
     theme: str = "auto",
-) -> Path:
+    stdout: bool = False,
+) -> Path | str:
     source = Path(input_path).expanduser().resolve()
     if not source.is_file():
         raise FileNotFoundError(f"Markdown input not found: {source}")
@@ -147,6 +149,8 @@ def convert_markdown(
     toc = renderer.toc if include_toc else ""
     base_uri = source.parent.as_uri().rstrip("/") + "/"
     document = _html_document(page_title, base_uri, toc, body, theme)
+    if stdout:
+        return document
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(document, encoding="utf-8")
     return output
@@ -183,6 +187,8 @@ def _html_document(title: str, base_uri: str, toc: str, body: str, theme: str) -
 
 def main(argv: list[str] | None = None) -> int:
     args = build_argument_parser().parse_args(argv)
+    if args.stdout and args.output:
+        build_argument_parser().error("--stdout cannot be combined with --output")
     try:
         output = convert_markdown(
             args.input,
@@ -190,11 +196,15 @@ def main(argv: list[str] | None = None) -> int:
             title=args.title,
             include_toc=args.toc,
             theme=args.theme,
+            stdout=args.stdout,
         )
     except (FileNotFoundError, ImportError, OSError, ValueError) as exc:
         print(f"[ERROR] {exc}", file=sys.stderr)
         return 1
-    print(f"[OK] HTML generated: {output}")
+    if args.stdout:
+        sys.stdout.buffer.write(output.encode("utf-8"))
+    else:
+        print(f"[OK] HTML generated: {output}")
     return 0
 
 

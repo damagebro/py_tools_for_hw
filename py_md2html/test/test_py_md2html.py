@@ -30,6 +30,19 @@ class WorkspaceTemporaryDirectory:
 
 
 class MarkdownToHtmlTests(unittest.TestCase):
+    def test_stdout_does_not_create_or_overwrite_html(self) -> None:
+        with WorkspaceTemporaryDirectory() as directory:
+            source = directory / "preview.md"
+            source.write_text("# Preview\n\n## Section\n", encoding="utf-8")
+            document = convert_markdown(source, stdout=True, include_toc=True, theme="dark")
+            self.assertIn('class="toc"', document)
+            self.assertIn('data-theme="dark"', document)
+            self.assertEqual([source], list(directory.iterdir()))
+            existing = source.with_suffix(".html")
+            existing.write_text("keep", encoding="utf-8")
+            convert_markdown(source, stdout=True)
+            self.assertEqual("keep", existing.read_text(encoding="utf-8"))
+
     def test_converts_common_markdown_and_preserves_asset_root(self) -> None:
         with WorkspaceTemporaryDirectory() as temporary_directory:
             source = temporary_directory / "guide.md"

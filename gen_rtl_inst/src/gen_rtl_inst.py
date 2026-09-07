@@ -478,8 +478,10 @@ def is_passthrough_port(port: Port) -> bool:
         and (
             port.name == "clk"
             or port.name == "rst_n"
+            or port.name == "clear"
             or port.name.endswith("_clk")
             or port.name.endswith("_rst_n")
+            or port.name.endswith("_clear")
         )
     )
 
@@ -550,7 +552,7 @@ def format_input_assigns(module: ModuleInfo, tag: str) -> list[str]:
     ]
     if not input_ports:
         return []
-    lines = ["", "//input assign---------------------------------------------------------------"]
+    lines: list[str] = []
     name_width = max(len(signal_name(tag, port)) for port in input_ports)
     for port in input_ports:
         lines.append(f"assign {signal_name(tag, port):<{name_width}} = {port.name};")
@@ -596,9 +598,9 @@ def format_module_instance(module: ModuleInfo) -> str:
     lines: list[str] = [
         f"// {module.name} integration snippet",
         *format_signal_declarations(module, tag),
-        *format_input_assigns(module, tag),
         "",
-        "//instance-------------------------------------------------------------------",
+        "//instance---",
+        *format_input_assigns(module, tag),
         *format_parameter_instance(module, inst_name),
         *format_port_instance(module, tag),
     ]

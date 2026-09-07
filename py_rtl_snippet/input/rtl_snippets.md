@@ -279,3 +279,18 @@ input  wire                     i_tx_axi_rlast   ,
 input  wire                     i_tx_axi_rvalid  ,
 output wire                     o_tx_axi_rready  ,
 ```
+
+## rtl-inst
+
+以下表格选择随 VS Code 插件离线发布的常用 `com` module。`rtl_path` 相对 `com` 仓库根目录；刷新 snippet 时由 `gen_rtl_inst` 解析对应 RTL，表格顺序也是补全列表的生成顺序。
+
+| module_name                    | rtl_path                                         | ram_shell | description                     |
+| ------------------------------ | ------------------------------------------------ | --------- | ------------------------------- |
+| `com_arbiter_rr`               | `common/com_arbiter_rr.sv`                       |           | Round-robin 仲裁器。             |
+| `com_pipe_vld`                 | `common/com_pipe_vld.sv`                         |           | Valid 流水线。                  |
+| `com_pipe_vld_rdy`             | `common/com_pipe_vld_rdy.sv`                     |           | Valid-ready 流水线。            |
+| `com_sync_fifo_reg`            | `common/fifo/com_sync_fifo_reg.sv`               |           | 寄存器实现的同步 FIFO。         |
+| `com_sync_fifo_reg_pfetch`     | `common/fifo/com_sync_fifo_reg_pfetch.sv`        |           | 带预取输出的同步 FIFO。         |
+| `com_async_fifo_reg`           | `common/fifo/com_async_fifo_reg.sv`              |           | 寄存器实现的异步 FIFO。         |
+| `com_sync_fifo_ram_1p1bank`    | `common/fifo/com_sync_fifo_ram_1p1bank.sv`       | `1p1bank` | 单个单口 SRAM bank 同步 FIFO。  |
+| `com_sync_fifo_ram_1p2bank`    | `common/fifo/com_sync_fifo_ram_1p2bank.sv`       | `1p2bank` | 两个单口 SRAM bank 同步 FIFO。  |

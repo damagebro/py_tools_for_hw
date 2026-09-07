@@ -21,6 +21,7 @@
         "onCommand:dmgHwTool.docs.openTool",
         "onCommand:dmgHwTool.preview.changeTheme",
         "onCommand:dmgHwTool.md2html.convert",
+        "onCommand:dmgHwTool.md2html.preview",
         "onCommand:dmgHwTool.csr.generateSingle",
         "onCommand:dmgHwTool.csr.generateNested",
         "onCommand:dmgHwTool.csr.openTreeHtml",
@@ -69,6 +70,10 @@
             {
                 "command": "dmgHwTool.md2html.convert",
                 "title": "HW Tool: Convert Markdown to HTML..."
+            },
+            {
+                "command": "dmgHwTool.md2html.preview",
+                "title": "HW Tool: Preview Markdown as HTML..."
             },
             {
                 "command": "dmgHwTool.csr.generateSingle",
@@ -142,6 +147,11 @@
         ],
         "menus": {
             "editor/context": [
+                {
+                    "command": "dmgHwTool.md2html.preview",
+                    "when": "resourceExtname == .md || resourceExtname == .markdown",
+                    "group": "navigation@9"
+                },
                 {
                     "command": "dmgHwTool.md2html.convert",
                     "when": "resourceExtname == .md || resourceExtname == .markdown",
