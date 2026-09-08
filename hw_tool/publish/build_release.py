@@ -12,6 +12,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -436,7 +437,14 @@ def release_staging(output_root: Path, version: str) -> Iterator[tuple[Path, Pat
             yield staged, destination
             if destination.exists() or destination.is_symlink():
                 raise FileExistsError(f"release already exists: {destination}")
-            staged.rename(destination)
+            for attempt in range(10):
+                try:
+                    staged.rename(destination)
+                    break
+                except PermissionError:
+                    if os.name != "nt" or attempt == 9:
+                        raise
+                    time.sleep(1)
     finally:
         lock.rmdir()
 
