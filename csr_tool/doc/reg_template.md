@@ -244,39 +244,3 @@ input  wire                     i_tx_ram_rd_ack          ,
 4. 产生gen_tb脚本,
 5. 产生testbench;
 
-# 问题记录
-
-1. 以top_reg.md, 跑单模块模式;  反复查看输出内容, 对齐输出格式;     //另外, 单模块/嵌套这两种模式, 比较拗口, 请gemini想几个模式名称候选;
-2. 现在问题是, 跑的嵌套模式,  我们先只输出.md格式, 请把.md格式打印出来, 先在网页上看到输出格式, 麻烦一点的我下载到本地运行, 减少下载到本地的次数;
-3. offset自动补全做的很好， 我现在把reg_name写了几个相同的； 请你再处理下， 观察去重内容；
-4. 在nested模式下, 对应rule8 + special.3 reg_type=slave;  如果填了bytesize, 检查是否超过可用地址空间; 如果没填bytesize, 从当前reg_name+下一行reg_name, 可推导bytesize可用大小;
-5. 打印出错信息时, 把当前位置+前一个位置的寄存器所有填写内容都打印出来;
-6. 打印出错信息时, 不用带着rule8等内容， 只带着用户填写的寄存器表格可见的内容;   rule1~rule8等仅仅是开发对齐需要, 不暴露给用户;
-7. 在nested模式下, 丰富输出内容格式, 我想增加html作为输出格式:
-   - 用flash或django等框架, 产生离线html文件格式, 可以.html通过浏览器看到更好的格式呈现。
-   - 最好是公司内网能获取的第三方包, 可能是flash?  请gemini推荐一个;  公司内网一般是linux操作系统，不能连接外网, 要通过离线包安装第三方包;
-   - csr_tool增加包检测功能, (1)最基础用markdown格式, 在win/mac/linux任意环境都能跑, 几乎不依赖第三方包;  (2)增加输出内容为html格式, 检查第三方包是否存在, 若不存在, 只用基础markdown也能工作;
-   - 在html格式中, 也类似markdown格式, 有address_map+每个module节点的寄存器定义; (1)在address_map中增加超链接, 点击跳转到对应的寄存器定义; (2) 每个module的标题, 可以折叠/展开, 查看子模块的寄存器定义;
-8. 刷新README.md内容, 以前内容都不要, 按当前内容刷新;
-   - 最开始简介工具功能(50字左右), 然后面向使用者, 说明如何运行;
-   - 面向rtl单个module用户, 说明填表方式, 规则, 输出内容;
-   - 面向rtl集成者/top验证/固件开发者, 简介嵌套模式输出内容;
-   - 面向共同的该工具开发者, 说明中间变量数据结构, 如何按tree结构遍历;  方便以后生成rtl/tb/firmware;
-9. 增加输入输出文件格式excel格式,  (1) 调用openpyxl第三方包;  (2) 如果该包不存在，提示包不存在, 但markdown基础格式仍可运行;   (3) tree结构的excel输出, 第一个sheet输出address_map, 后面每个sheet输出一个module节点; (4) 好像excel有sheet导航栏, 类似网页标题目录形式, 点击可以跳转到对应sheet;  如果openpyxl能生成该导航栏就生成, 生成不了就忽略导航栏功能。
-10. 近期规划: (1) 中间模型内容对齐, (2) 生成好readme.md,  (3) firmware.h内容对齐, (4) src/目录下, python源代码组织，可以多一些文件, 单个文件不超过500~1000行, 公用函数可以提取xx_common.py;
-11. 中级规划: 开始rtl生成, (1) reg_bus定义, 高性能; (2) reg_bus到rtl实现, shadow N/repeat N的检查 (3) 输出接口封装为struct/package形式; (4) 开发配套功能, a. amba2reg_bus协议转换, axi/axi_lite/apb/ahb与reg_bus的互转, b. reg_bus.regslice功能, 远距离打拍, c. reg_bus.demux功能, 适配reg_type=slave/mem;  d. reg_bus to sram_access功能;
-12. 当reg_type=slave的时候,  如果没有slv_filename, 或filename对应的文件不存在， 要报错退出;
-13. xxx_all_reg_type.h中, 只产生reg_type=cfg/status/toggle/irq类型的寄存器,  不产生slave/mem类型;
-14. static npu_top_init_ts npu_top_init = {}; 这个会产生程序存储空间, 希望xxx_all_reg_type.h中, 全部是类型声明。  这里考虑改成一个init_func()函数声明？
-15. 注释都用英文注释， 只使用//行注释, 不使用/**/块注释;
-16. ${block_name}_reg_ts改成${block_name}_block_reg_ts, 强调是1个block内所有寄存器的集合。
-17. 本次问题:
-   - 在xx_all_reg_type.h中, 不用`typedef uint32_t u32;`, 把后面所有的u32, 全部换成uint32_t;
-   - 在xx_all_reg_type.h的addr/default_val部分, 只有struct/function的声明和定义, 没有实例化，不占用程序空间。对于`typedef const struct {}xx_init_ts`, 可以在struct里面带一个addr/default映射关系的函数声明, 在struct外面定义这个函数。
-18. 当前gen_rtl基本已对齐,  剩余的内容:
-   - special填写 shadow和shadow N;  y
-   - 产生tb, 测试CSR读写行为;
-   - 产生apb2csr, axi_lite2csr, ahb2csr协议转换模块;  产生csr2apb, csr2axi_lite协议转换模块；  y
-19. 开始tb组件生成， 支持UVM_REG, 支持BLOCK嵌套集成。
-20. readme说明， gen rtl/tb/fw的位置
-21. sv/vhdl/c保留关键字检查
