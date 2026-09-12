@@ -144,7 +144,7 @@ python src/autogen_reg.py -i input/xlsx/top_reg.xlsx --nested -o out
 
 多个属性使用逗号分隔：
 
-- `slv_filename=xxx.md`：`slave` 引用的子模块定义文件。
+- `slv_filename=xxx.md`：`slave` 引用的子模块定义，只填 `.md` 或 `.xlsx` 文件名，不填路径或 URL；搜索来源统一填写在 `base_info`。
 - `bytesize=0x...`：`slave` 或 `mem` 占用的地址空间。
 - `repeat N`：连续生成 N 个寄存器实例。
 - `shadow` / `shadow 1`：一份 shadow 和一份 working 配置。
@@ -180,6 +180,47 @@ python src/autogen_reg.py -i input/leaf_a2_reg.md -o out
 ### 4.2 nested 模式
 
 nested 从顶层文件开始，递归解析每个 `slave` 的 `slv_filename`：
+
+`special` 中可使用以下写法，Markdown 与 Excel 相同：
+
+```text
+slv_filename=sub_node.md, bytesize=0x400
+slv_filename=sub_node.xlsx, bytesize=0x400
+```
+
+先在当前引用文档的同目录查找；找到则直接使用，不获取其他来源。未找到时，递归搜索所有配置目录和 Git 仓库，按完整文件名（含扩展名）匹配。重复配置命中同一实际路径只计一份；多个不同路径有同名文件时列出匹配路径并报错，不按配置顺序任选一个。每个子节点都使用同样的规则，保留原有同目录使用方式。
+
+在当前文档的 `base_info` 中填写搜索来源，多个来源填多行，同名 `item` 不会被覆盖：
+
+```markdown
+# base_info
+
+| item      | type_input                                                      |
+| --------- | --------------------------------------------------------------- |
+| slave_dir | C:/project/cpu/csr                                              |
+| slave_dir | C:/project/npu/csr                                              |
+| slave_git | url=https://example.com/team/cpu.git, path=doc/csr, ref=v1.2.0  |
+| slave_git | url=git@example.com:team/npu.git, path=csr, ref=main            |
+```
+
+```bash
+python src/autogen_reg.py -i input/top_reg.md --nested -o out
+```
+
+- `slave_dir`：本机绝对目录，Linux 示例为 `/project/csr`；Windows 路径中的空格无需额外加引号。
+- `slave_git`：使用逗号分隔 `url=...`、`path=...`、`ref=...`，顺序不限，允许逗号及等号两侧有空格。`url` 必填，支持 HTTPS、HTTP、SSH（含 `git@host:group/repo.git`）。
+- `path`：可选，仓库内搜索目录，省略时搜索仓库根目录；不能是绝对路径或含 `..`。
+- `ref`：可选，支持 branch/tag/commit ID，默认使用远端默认分支 HEAD。
+
+两种来源可混合填写。空白或 `-` 行视为未配置；`slave_git` 的未知属性、重复属性、缺少 URL 等情况会报错。属性值不能包含作为分隔符的逗号。
+
+Excel 在 `base_info` sheet 中使用相同的多行写法。生成的单模块 Markdown / Excel 会保留这些来源行，可再次作为输入。配置作用于当前节点及其子树；子节点可追加来源，但不会影响兄弟节点。同名冲突可通过缩小搜索目录或调整文件名解决。
+
+不再提供 `--slave-dir`、`--slave-git`、`--slave-config`，也不读取外部 JSON 配置文件。扫描跳过 `.git`、`.csr_tool`、`__pycache__`，不跟随子目录符号链接。
+
+仅 `--nested` 且同目录未找到时才搜索配置来源、获取 Git 文档。目标系统须安装 Git，并提前配置 SSH key 或 Git 凭据管理器，不要把密码、token 写入寄存器文档。每次生成需要 Git 搜索时重新解析远端 ref，不静默使用过期版本；同次解析的相同 URL/ref 只获取一次，每个搜索根目录只扫描一次。正式生成推荐指定 tag 或 commit ID。
+
+Git 获取结果按提交保存到 `out/.csr_tool/repository/`（随 `-o` 改变），不会修改开发者已有 checkout。直接调用 `CSRParser` 时同样读取文档的 `base_info`；默认缓存位于顶层输入文档旁的 `.csr_tool/repository/`，可通过 `repo_cache` 指定。缓存可在生成结束后删除，下次重新获取；暂不支持 Git submodule、Git LFS 实体下载及含符号链接的仓库。找不到文件、目录不存在、ref 不存在、获取失败、同名冲突、循环引用或地址空间越界时明确报错。
 
 ```bash
 python src/autogen_reg.py -i input/top_reg.md --nested -o out

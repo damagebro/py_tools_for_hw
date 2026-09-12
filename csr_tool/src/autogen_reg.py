@@ -85,7 +85,9 @@ def build_template_argument_parser() -> argparse.ArgumentParser:
 def run(input_path: str, outdir: str, nested: bool) -> list[Path]:
     source = Path(input_path).resolve()
     output = Path(outdir).resolve()
-    module = CSRParser(str(source), nested=nested).parse()
+    module = CSRParser(
+        str(source), nested=nested, repo_cache=str(output / ".csr_tool" / "repository"),
+    ).parse()
     generated: list[Path] = []
     generated.extend(
         DocGenerator(module, str(output / "doc")).generate_all(is_nested=nested)

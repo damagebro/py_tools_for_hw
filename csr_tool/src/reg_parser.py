@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
+from .slave_source import SlaveSources, parse_base_sources
 
 from .models import (
     BaseInfoModel,
@@ -54,12 +55,16 @@ BASE_ALIASES = {
 
 
 class CSRParser:
-    def __init__(self, input_path: str, nested: bool = False):
+    def __init__(self, input_path: str, nested: bool = False, repo_cache: str | None = None):
         self.input_path = Path(input_path).resolve()
         self.nested = nested
         self._active_paths: list[Path] = []
+        self._sources = SlaveSources(
+            Path(repo_cache) if repo_cache else self.input_path.parent / ".csr_tool" / "repository",
+        )
 
     def parse(self) -> ModuleModel:
+        self._sources.reset()
         return self._parse_file(self.input_path, None)
 
     def _parse_file(self, path: Path, allocated_size: int | None) -> ModuleModel:
@@ -71,6 +76,7 @@ class CSRParser:
             raise CSRValidationError(f"Recursive slave reference detected: {chain}")
 
         self._active_paths.append(path)
+        parent_sources = self._sources
         try:
             base_data, register_rows = self._load_input(path)
             module = ModuleModel(
@@ -97,12 +103,14 @@ class CSRParser:
                     f"'{last.raw_name}' at offset 0x{last.offset:X}"
                 )
             if self.nested:
+                self._sources = parent_sources.scoped(module.base_info.slave_sources)
                 self._load_children(module, path)
             return module
         finally:
+            self._sources = parent_sources
             self._active_paths.pop()
 
-    def _load_input(self, path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    def _load_input(self, path: Path) -> tuple[list[tuple[str, Any]], list[dict[str, Any]]]:
         suffix = path.suffix.lower()
         if suffix == ".md":
             return self._load_markdown(path)
@@ -114,7 +122,7 @@ class CSRParser:
 
     def _load_markdown(
         self, path: Path
-    ) -> tuple[dict[str, str], list[dict[str, str]]]:
+    ) -> tuple[list[tuple[str, Any]], list[dict[str, str]]]:
         sections: dict[str, list[str]] = {}
         current = ""
         for line in path.read_text(encoding="utf-8-sig").splitlines():
@@ -139,11 +147,11 @@ class CSRParser:
             "reg_define",
             required=True,
         )
-        base_data = {
-            row[base_headers[0]]: row[base_headers[1]]
+        base_data = [
+            (row[base_headers[0]], row[base_headers[1]])
             for row in base_rows
             if row.get(base_headers[0], "")
-        } if len(base_headers) >= 2 else {}
+        ] if len(base_headers) >= 2 else []
         return base_data, [
             {key.lower(): value for key, value in row.items()}
             for row in reg_rows
@@ -183,27 +191,30 @@ class CSRParser:
 
     def _load_excel(
         self, path: Path
-    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    ) -> tuple[list[tuple[str, Any]], list[dict[str, Any]]]:
         try:
             import openpyxl
         except ImportError as exc:
             raise ImportError(
                 "openpyxl is required for .xlsx input"
             ) from exc
-        workbook = openpyxl.load_workbook(path, data_only=True, read_only=True)
+        source = path.open("rb")
+        try:
+            workbook = openpyxl.load_workbook(source, data_only=True, read_only=True)
+        except BaseException:
+            source.close()
+            raise
         try:
             if "reg_define" not in workbook.sheetnames:
                 raise CSRValidationError(
                     f"{path.name}: workbook requires a 'reg_define' sheet"
                 )
-            base_data: dict[str, Any] = {}
+            base_data: list[tuple[str, Any]] = []
             if "base_info" in workbook.sheetnames:
                 rows = self._worksheet_values(workbook["base_info"])
                 for row in rows[1:]:
                     if row and row[0] not in (None, ""):
-                        base_data[str(row[0]).strip()] = (
-                            row[1] if len(row) > 1 else ""
-                        )
+                        base_data.append((str(row[0]).strip(), row[1] if len(row) > 1 else ""))
             reg_values = self._worksheet_values(workbook["reg_define"])
             if not reg_values:
                 raise CSRValidationError(
@@ -223,7 +234,10 @@ class CSRParser:
                 })
             return base_data, register_rows
         finally:
-            workbook.close()
+            try:
+                workbook.close()
+            finally:
+                source.close()
 
     @staticmethod
     def _worksheet_values(sheet: object) -> list[tuple[Any, ...]]:
@@ -233,11 +247,11 @@ class CSRParser:
         ]
 
     def _parse_base_info(
-        self, data: dict[str, Any], path: Path
+        self, data: list[tuple[str, Any]], path: Path
     ) -> BaseInfoModel:
         normalized = {
             BASE_ALIASES.get(str(key).strip().lower(), str(key).strip().lower()): value
-            for key, value in data.items()
+            for key, value in data
         }
         known = {
             "reg_bitwidth",
@@ -246,6 +260,8 @@ class CSRParser:
             "system_prefix",
             "author",
             "email",
+            "slave_dir",
+            "slave_git",
         }
         bitwidth = parse_int(
             normalized.get("reg_bitwidth", 32),
@@ -268,6 +284,7 @@ class CSRParser:
             system_prefix=str(normalized.get("system_prefix", "")).strip().lower(),
             author=str(normalized.get("author", "")).strip(),
             email=str(normalized.get("email", "")).strip(),
+            slave_sources=parse_base_sources(data, f"{path.name} base_info"),
             extras={
                 key: str(value)
                 for key, value in normalized.items()
@@ -475,6 +492,8 @@ class CSRParser:
             raise CSRValidationError(
                 f"{name}: slv_filename is only valid for reg_type=slave"
             )
+        if reg_type == "slave":
+            SlaveSources.validate_filename(special.slv_filename)
         if reg_type == "mem" and special.bytesize is None:
             raise CSRValidationError(
                 f"{name}: reg_type=mem requires bytesize"
@@ -526,7 +545,7 @@ class CSRParser:
         for reg in module.registers:
             if reg.reg_type != "slave":
                 continue
-            child_path = (parent_path.parent / reg.special.slv_filename).resolve()
+            child_path = self._sources.resolve(reg.special.slv_filename, parent_path)
             if not child_path.exists():
                 raise FileNotFoundError(
                     f"{reg.raw_name}: slave file not found: {child_path}"

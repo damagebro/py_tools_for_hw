@@ -49,6 +49,8 @@
 1. special是特殊规则描述, 多种特殊规则之间用逗号分隔符隔开;  常见特殊规则有, repeat N/shadow/shadow N; repeat是同一个reg_name重复出现N次, 占N个reg_addr;  shadow是多一个寄存器副本, shadow N是有N个寄存器副本;
 2. reg_type=cfg/status/cmd/irq的时候, 可以填repeat/shadow;
 3. reg_type=slave的时候, 要填下一个子模块节点的slv_filename=sub_node.md; 选填bytesize(推荐必填), 限定addr+size寄存器地址空间, 若没填写bytesize, 从当前reg_name+下一行reg_name, 可限定bytesize大小;
+
+`slv_filename` 只填文件名，例如 `slv_filename=sub_node.md, bytesize=0x400`，不填目录或 Git 信息。搜索来源统一在 `base_info` 中填写：`slave_dir` 行填本机绝对目录，`slave_git` 行填 `url=https://example.com/team/cpu.git, path=doc/csr, ref=v1.2.0`。多个来源填多行，同名 item 不覆盖；`url` 必填，`path` 默认仓库根目录，`ref` 支持 branch/tag/commit，默认 HEAD。Markdown 和 Excel 使用相同写法，生成的单模块文档保留来源行。nested 模式优先当前文档同目录，未找到时合并搜索当前节点及祖先节点配置的来源；不同路径有同名文件时明确报错。子节点配置只作用于自身子树，不影响兄弟节点。无需 CLI 来源选项或外部 JSON 文件，详见 [README 的 nested 模式](../README.md#42-nested-模式)。
 4. reg_type=mem的时候, 不用填slv_filename, 因为访问当前节点的sram地址空间, 没有下一个模块;  必填bytesize, 告诉sram地址空间大小有多少;
 5. 关于repeat N, N个reg的默认值可以不同, 在default_val中用CSV逗号分隔符方式给出初始值, 如果分割后初始值数量小于N, 以最后一个初始值填充到N; 比如寄存器a[4], 填了repeat 4, 如果default=0,1;  则a[0]=0, a[1]=a[2]=a[3]=1;
 
@@ -243,4 +245,3 @@ input  wire                     i_tx_ram_rd_ack          ,
    - 输入输出都是csr_bus,  vld/rdy双向隔离
 4. 产生gen_tb脚本,
 5. 产生testbench;
-

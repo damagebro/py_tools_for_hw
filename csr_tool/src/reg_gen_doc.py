@@ -6,6 +6,7 @@ from typing import Iterable
 
 from .models import ModuleModel, RegisterModel
 from .reg_common import write_text
+from .slave_source import source_rows
 
 
 REG_HEADERS = [
@@ -75,6 +76,7 @@ class DocGenerator:
         if base.email:
             base_rows.append(["email", base.email, "-"])
         base_rows.extend([key, value, "-"] for key, value in base.extras.items())
+        base_rows.extend(source_rows(base.slave_sources))
 
         parts = [
             "# base_info",
@@ -306,6 +308,8 @@ class DocGenerator:
             base_sheet.append(["author", base.author, "-"])
         if base.email:
             base_sheet.append(["email", base.email, "-"])
+        for row in source_rows(base.slave_sources):
+            base_sheet.append(row)
         reg_sheet = workbook.create_sheet("reg_define")
         reg_sheet.append(REG_HEADERS)
         for row in self._register_rows(module):

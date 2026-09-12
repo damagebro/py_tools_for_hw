@@ -14,6 +14,7 @@ class BaseInfoModel:
     author: str = ""
     email: str = ""
     extras: dict[str, str] = field(default_factory=dict)
+    slave_sources: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
