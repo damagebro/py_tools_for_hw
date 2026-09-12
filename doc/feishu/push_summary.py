@@ -15,6 +15,7 @@ import requests
 import markdown
 
 from client import ApiError, Feishu
+from tree_guard import check_remote_tree, node_at
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -264,13 +265,19 @@ class Publisher:
             self.state["archive"] = {"node_token": node["node_token"],
                                      "url": f"{self.origin}/wiki/{node['node_token']}"}
             self.persist()
+        node_at(self, self.state["archive"]["node_token"], self.parent)
         return self.state["archive"]["node_token"]
 
     def move_page(self, key, parent_token, parent_key):
         page = self.state["pages"][key]
+        node_at(self, parent_token)
         self.mutate(f"move {key}", "POST", f"/wiki/v2/spaces/{self.space}/nodes/{page['node_token']}/move",
                     json={"target_parent_token": parent_token, "target_space_id": self.space})
+        self.state["pending"] = f"verify move {key}"
+        self.persist()
+        node_at(self, page["node_token"], parent_token, page.get("document_id"))
         page["parent"] = parent_key
+        self.state.pop("pending")
         self.persist()
         print(f"MOVE {key} -> {parent_key}", flush=True)
 
@@ -299,6 +306,50 @@ class Publisher:
                 self.move_page(key, self.archive_node(), "__archive")
             for key in children:
                 self.move_page(key, parent, entry["key"])
+
+    def prune_archive(self):
+        archive = self.state.get("archive")
+        if not archive:
+            return
+        check_remote_tree(self)
+        obsolete = {k for k, p in self.state["pages"].items() if p.get("archived")}
+        active = {e["key"] for e in self.entries}
+        if obsolete & active:
+            raise RuntimeError("Refusing to delete a current chapter")
+        while obsolete:
+            leaves = [k for k in obsolete if not any(p.get("parent") == k for p in self.state["pages"].values())]
+            if not leaves:
+                raise RuntimeError("Archive is not a closed tree")
+            for key in leaves:
+                page = self.state["pages"][key]
+                parent_key = page["parent"]
+                parent = archive["node_token"] if parent_key == "__archive" else self.state["pages"][parent_key]["node_token"]
+                self.delete_leaf(page["node_token"], parent)
+                self.state.setdefault("deleted_pages", {})[key] = self.state["pages"].pop(key)
+                self.state.pop("pending")
+                self.persist()
+                obsolete.remove(key)
+                print(f"DELETE {key}", flush=True)
+        self.delete_leaf(archive["node_token"], self.parent)
+        self.state["deleted_archive"] = self.state.pop("archive")
+        self.state.pop("pending")
+        self.persist()
+
+    def delete_leaf(self, token, parent):
+        node_at(self, token, parent)
+        if self.client.items(f"/wiki/v2/spaces/{self.space}/nodes", parent_node_token=token):
+            raise RuntimeError(f"Refusing to delete nonempty node: {token}")
+        result = self.mutate(f"delete {token}", "DELETE", f"/wiki/v2/spaces/{self.space}/nodes/{token}",
+                             json={"obj_type": "wiki"})
+        self.state["pending"] = f"verify delete {token}"
+        self.state.setdefault("delete_tasks", {})[token] = result
+        self.persist()
+        for attempt in range(10):
+            siblings = self.client.items(f"/wiki/v2/spaces/{self.space}/nodes", parent_node_token=parent)
+            if token not in {n["node_token"] for n in siblings}:
+                return
+            time.sleep(1)
+        raise RuntimeError(f"Deletion not yet confirmed: {token}; inspect task before retrying")
 
     def content(self, entry):
         if entry.get("source"):
@@ -423,10 +474,12 @@ class Publisher:
         print(f"OK {entry['title']}: {len(roots)} blocks, {len(images)} images", flush=True)
 
     def run(self):
+        check_remote_tree(self, require_summary=not getattr(self.args, "sync_tree", False))
         self.preflight()
         self.ensure_nodes()
         if self.args.sync_tree:
             self.sync_tree()
+        check_remote_tree(self)
         for entry in self.entries:
             self.publish_page(entry)
         for entry in self.entries:
@@ -439,6 +492,9 @@ class Publisher:
             actual = [n["node_token"] for n in nodes if n["node_token"] in expected]
             if actual != expected:
                 raise RuntimeError(f"Wiki sibling order differs from SUMMARY: {entry['title']}")
+        if self.args.delete_removed:
+            self.prune_archive()
+        check_remote_tree(self)
         report = {"url": self.state["pages"]["book"]["url"], "pages": len(self.entries),
                   "documents": sum(bool(e.get("source")) for e in self.entries),
                   "warnings": sorted(self.warnings), "verified_order": True}
@@ -459,11 +515,19 @@ def main():
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--sync-tree", action="store_true",
                         help="Move/reorder managed pages to match SUMMARY; archive removed chapters")
+    parser.add_argument("--check-tree", action="store_true", help="Read-only remote hierarchy and SUMMARY validation")
+    parser.add_argument("--delete-removed", action="store_true", help="With --sync-tree, delete removed pages and temporary archive")
     args = parser.parse_args()
+    if args.delete_removed and not args.sync_tree:
+        parser.error("--delete-removed requires --sync-tree")
     args.root = args.root.resolve()
     summary = (args.summary or args.root / "SUMMARY.md").resolve()
     args.state = (args.state or args.root / "out/feishu_summary/state.json").resolve()
     entries = [{"key": "book", "title": args.title}] + parse_summary(summary, args.root)
+    if args.check_tree:
+        check_remote_tree(Publisher(args, entries))
+        print("Remote tree and SUMMARY: OK; no changes made")
+        return
     if args.dry_run:
         for entry in entries:
             print(f"{entry.get('parent', '-')} -> {entry['title']} [{entry.get('source', 'chapter')}]")
