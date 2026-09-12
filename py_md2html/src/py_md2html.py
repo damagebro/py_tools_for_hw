@@ -93,6 +93,10 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Insert a generated table of contents before the document",
     )
     parser.add_argument(
+        "--number-headings", action="store_true",
+        help="Number unnumbered section headings, preserving existing numbers and source Markdown",
+    )
+    parser.add_argument(
         "--theme",
         choices=sorted(THEMES),
         default="auto",
@@ -113,6 +117,7 @@ def convert_markdown(
     include_toc: bool = False,
     theme: str = "auto",
     stdout: bool = False,
+    number_headings: bool = False,
 ) -> Path | str:
     source = Path(input_path).expanduser().resolve()
     if not source.is_file():
@@ -145,6 +150,15 @@ def convert_markdown(
         extension_configs={"toc": {"permalink": True}},
         output_format="html5",
     )
+    if number_headings:
+        from markdown.treeprocessors import Treeprocessor
+
+        class HeadingNumbers(Treeprocessor):
+            def run(self, root):
+                _number_headings(root, self.md)
+
+        # Run after TOC has assigned IDs, so existing fragment links stay valid.
+        renderer.treeprocessors.register(HeadingNumbers(renderer), "heading_numbers", 4)
     body = renderer.convert(markdown_text)
     toc = renderer.toc if include_toc else ""
     base_uri = source.parent.as_uri().rstrip("/") + "/"
@@ -154,6 +168,86 @@ def convert_markdown(
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(document, encoding="utf-8")
     return output
+
+
+def _heading_number(name: str) -> list[int] | None:
+    name = html.unescape(name).strip()
+    match = re.match(r"^([0-9]+(?:\.[0-9]+)*)(?=$|[.)\u3001\uff0e\s])", name)
+    if match:
+        return [int(part) for part in match[1].split(".")]
+    match = re.match(
+        r"^(?:\u7b2c([0-9\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341\u767e\u5343]+)[\u7ae0\u8282\u7bc7]|"
+        r"([\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341\u767e\u5343]+)[\u3001.])", name
+    )
+    if not match:
+        return None
+    text = match[1] or match[2]
+    if text.isdigit():
+        return [int(text)]
+    digits = dict(zip("\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d", range(1, 10)))
+    units = {"\u5341": 10, "\u767e": 100, "\u5343": 1000}
+    value, digit = 0, 0
+    for character in text:
+        if character in digits:
+            digit = digits[character]
+        else:
+            value += (digit or 1) * units[character]
+            digit = 0
+    return [value + digit]
+
+
+def _number_headings(root, renderer) -> None:
+    tokens = {}
+
+    def collect(items):
+        for token in items:
+            tokens[token["id"]] = token
+            collect(token.get("children", []))
+
+    collect(renderer.toc_tokens)
+    headings = [element for element in root.iter() if re.fullmatch(r"h[1-6]", str(element.tag))]
+    single_title = sum(element.tag == "h1" for element in headings) == 1
+    stack = []
+    changed = {}
+    for index, element in enumerate(headings):
+        token = tokens.get(element.get("id"))
+        if token is None:
+            continue
+        existing = _heading_number(token["name"])
+        if single_title and index == 0 and element.tag == "h1" and existing is None:
+            continue
+        level = int(element.tag[1])
+        previous = None
+        while stack and stack[-1][0] >= level:
+            popped_level, popped_number = stack.pop()
+            if popped_level == level:
+                previous = popped_number
+        parent = stack[-1][1] if stack else []
+        if existing:
+            number = existing if len(existing) > 1 else parent + existing
+        elif previous:
+            number = previous[:-1] + [previous[-1] + 1]
+        else:
+            number = parent + [1]
+        stack.append((level, number))
+        if existing is not None:
+            continue
+        prefix = ".".join(str(part) for part in number) + (". " if len(number) == 1 else " ")
+        element.text = prefix + (element.text or "")
+        token["name"] = prefix + token["name"]
+        changed[token["id"]] = token["name"]
+
+    # Update an explicit [TOC] marker as well as the separately rendered TOC.
+    for element in root.iter("div"):
+        if "toc" in element.get("class", "").split():
+            for link in element.iter("a"):
+                target = link.get("href", "").removeprefix("#")
+                if target in changed:
+                    link.text = changed[target]
+    toc = renderer.serializer(renderer.treeprocessors["toc"].build_toc_div(renderer.toc_tokens))
+    for processor in renderer.postprocessors:
+        toc = processor.run(toc)
+    renderer.toc = toc
 
 
 def _document_title(markdown_text: str, fallback: str) -> str:
@@ -197,6 +291,7 @@ def main(argv: list[str] | None = None) -> int:
             include_toc=args.toc,
             theme=args.theme,
             stdout=args.stdout,
+            number_headings=args.number_headings,
         )
     except (FileNotFoundError, ImportError, OSError, ValueError) as exc:
         print(f"[ERROR] {exc}", file=sys.stderr)

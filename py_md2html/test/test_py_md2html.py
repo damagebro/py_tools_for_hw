@@ -30,6 +30,55 @@ class WorkspaceTemporaryDirectory:
 
 
 class MarkdownToHtmlTests(unittest.TestCase):
+    def test_numbers_headings_and_toc_without_changing_source_or_links(self) -> None:
+        with WorkspaceTemporaryDirectory() as directory:
+            source = directory / "guide.md"
+            text = "# Guide\n\n[Details](#details)\n\n## Overview\n\n### **Details**\n\n## Next\n\n```md\n# Example\n```\n"
+            source.write_text(text, encoding="utf-8")
+            document = convert_markdown(source, stdout=True, include_toc=True, number_headings=True)
+            self.assertIn('<h1 id="guide">Guide', document)
+            self.assertIn('<h2 id="overview">1. Overview', document)
+            self.assertIn('<h3 id="details">1.1 <strong>Details</strong>', document)
+            self.assertIn('<h2 id="next">2. Next', document)
+            self.assertIn('href="#details">1.1 Details</a>', document)
+            self.assertIn('href="#details">Details</a>', document)
+            self.assertIn('# Example\n</code>', document)
+            self.assertEqual(source.read_text(encoding="utf-8"), text)
+            self.assertFalse(source.with_suffix(".html").exists())
+
+    def test_preserves_existing_numbers_and_continues_them(self) -> None:
+        with WorkspaceTemporaryDirectory() as directory:
+            source = directory / "guide.md"
+            for title in ("4. Existing", "四、Existing", "第四章 Existing", "4 Existing", "4.已有编号"):
+                with self.subTest(title=title):
+                    source.write_text(f"# Guide\n\n## {title}\n\n### Details\n\n## Next\n", encoding="utf-8")
+                    document = convert_markdown(source, stdout=True, include_toc=True, number_headings=True)
+                    self.assertIn(f">{title}<a", document)
+                    self.assertIn('>4.1 Details<a', document)
+                    self.assertIn('>5. Next<a', document)
+
+    def test_multiple_h1_skipped_levels_and_explicit_toc_marker(self) -> None:
+        with WorkspaceTemporaryDirectory() as directory:
+            source = directory / "guide.md"
+            source.write_text("[TOC]\n\n# First\n\n### Detail\n\n# Second\n", encoding="utf-8")
+            document = convert_markdown(source, stdout=True, include_toc=True, number_headings=True)
+            self.assertIn('>1. First<a', document)
+            self.assertIn('>1.1 Detail<a', document)
+            self.assertIn('>2. Second<a', document)
+            self.assertEqual(document.count('href="#detail">1.1 Detail</a>'), 2)
+
+    def test_numbering_cli_and_plain_cli_compatibility(self) -> None:
+        with WorkspaceTemporaryDirectory() as directory:
+            source = directory / "guide.md"
+            source.write_text("# Guide\n\n## Intro\n", encoding="utf-8")
+            self.assertEqual(main([str(source), "--toc", "--number-headings"]), 0)
+            document = source.with_suffix(".html").read_text(encoding="utf-8")
+            self.assertIn('aria-label="Table of contents"', document)
+            self.assertIn('>1. Intro<a', document)
+            plain = convert_markdown(source, stdout=True)
+            self.assertNotIn('aria-label="Table of contents"', plain)
+            self.assertIn('>Intro<a', plain)
+
     def test_stdout_does_not_create_or_overwrite_html(self) -> None:
         with WorkspaceTemporaryDirectory() as directory:
             source = directory / "preview.md"

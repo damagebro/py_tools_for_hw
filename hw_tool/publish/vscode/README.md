@@ -4,36 +4,38 @@
 
 ## 当前功能与命令
 
+Markdown 预览和导出固定生成 TOC，并为未编号标题自动补充层级编号，不再询问。已有编号保留；唯一且位于首个标题位置的未编号一级标题作为文档名，不补编号。正文与目录编号一致，Markdown 源文件和原有标题锚点不变，代码块不参与编号。其他工具的文档查看命令保持原有目录行为。
+
 按 `Ctrl+Shift+P` 打开命令面板，输入 `HW Tool:` 可查看全部命令。编辑器右键菜单提供 Markdown/CSR 命令及 RTL instance 插入或复制；`.v/.sv` 的编辑器和 Explorer 右键菜单均可调用对应 RTL 工具。
 
-| 工具/功能组        | VS Code 命令或入口                                 | 使用条件                           | 说明                                                                                                    |
-| ------------------ | -------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| **通用功能**       | `HW Tool: Open Tool Documentation...`              | Python 环境依赖已安装              | 从已注册工具中选择 README，转换为 HTML 后在 Webview 中打开。                                            |
-|                    | `HW Tool: Change Preview Theme...`                 | 无                                 | 设置文档和 Markdown HTML 预览主题，可选 `Light`、`Dark` 或 `Follow VS Code`。                           |
-|                    | `HW Tool: Convert Markdown to HTML...`             | 当前文件为 `.md/.markdown`         | 选择是否生成目录，在 Markdown 同目录输出同名 `.html`，随后在 Webview 中打开；也可从编辑器右键菜单调用。 |
-|                    | `HW Tool: Preview Markdown as HTML...`             | 当前文件为 `.md/.markdown`         | 选择是否生成目录，直接在 Webview 中预览，不生成或覆盖任何 HTML 文件；也可从编辑器右键菜单调用。当前文件有未保存修改时先保存 Markdown。 |
-| **py_rtl_snippet** | 输入 `rtl-` 前缀                                   | 当前文件为 `.v/.sv`                | 由 VS Code 原生补全列出代码片段；`rtl-inst-<module>` 提供发布时固化的常用 `com` module 例化。           |
-| **rtl_inst**       | `HW Tool: Replace Selected RTL Path With Instance` | `.v/.sv` 中选中绝对 RTL 路径       | 调用 `rtl_inst --stdout`，成功后用 instance snippet 一次性替换选区；失败时选区保持不变。                |
-|                    | `HW Tool: Insert RTL Instance From File...`        | 当前文件为 `.v/.sv`                | 图形选择一个 `.v/.sv` 文件，在当前光标位置插入 instance snippet。                                       |
-|                    | `HW Tool: Copy RTL Instance`                       | 当前或 Explorer 选中 `.v/.sv`      | 自动使用当前文件或 Explorer 右键文件，生成 instance 并写入剪贴板，用户使用 `Ctrl+V` 粘贴。              |
-| **rtl_dummy**      | `HW Tool: Generate RTL Dummy...`                   | 当前或 Explorer 选中 `.v/.sv`      | 只选择一次 `bbox/stub/port_swap`，生成到源文件旁的 `out/rtl_dummy/`，随后打开结果文件。                 |
-| **gen_tb**         | `HW Tool: Generate Empty TB Environment`           | 当前 Terminal 可提供 cwd           | 在 Terminal cwd 的 `out/sim/` 生成空 TB 环境；完成后可打开 README 或在生成目录打开 Terminal。           |
-|                    | `HW Tool: Generate TB From Current Filelist...`    | 当前或 Explorer 选中 `.f`          | 只输入一次 DUT top module，在 filelist 同目录的 `out/sim/` 生成 TB 环境。                               |
-| **mem_tool**       | `HW Tool: Open Memory Tool Documentation`          | Python 环境依赖已安装              | 将插件内置的 `mem_tool/README.md` 转换为 HTML，并在 Webview 中打开。                                    |
-|                    | `HW Tool: Generate Memory Shell...`                | 当前 Terminal 可提供 cwd           | 只输入一次 subsystem prefix，在 Terminal cwd 的 `out/mem_tool/` 执行 `init` 并打开生成的 shell。        |
-|                    | `HW Tool: Integrate Memory From Excel`             | 当前或 Explorer 选中 `.xlsx`       | 输入 SRAM shell prefix，执行 `inst` 并打开集成 PHY instance 后的 memory shell。                         |
-| **csr_tool**       | `HW Tool: Open CSR Documentation`                  | Python 环境依赖已安装              | 将插件内置的 `csr_tool/README.md` 转换为 HTML，并在 Webview 中打开。                                    |
-|                    | `HW Tool: Create CSR Template...`                  | 已打开 Terminal、文件或工程        | 四选一生成 Markdown/Excel 模板，并可选择是否包含 `base_info`；文件名固定为 `reg_define.md/.xlsx`。      |
-|                    | `HW Tool: Create Default CSR Template`             | 已打开 Terminal、文件或工程        | 不弹出选项，直接生成仅包含 `reg_define` 的 `reg_define.md`。                                            |
-|                    | `HW Tool: Generate CSR (Single)`                   | 当前文件为 CSR `.md/.xlsx`         | 保存当前输入并生成单模块 CSR，固定输出到输入文件同目录的 `out/`。                                       |
-|                    | `HW Tool: Generate CSR (Nested)`                   | 当前文件为 CSR `.md/.xlsx`         | 以 `--nested` 模式生成多层 CSR，固定输出到输入文件同目录的 `out/`；完成后可直接打开 `_tree.html`。      |
-|                    | `HW Tool: Open CSR Tree HTML`                      | 当前文件为 CSR `.md/.xlsx`         | 在当前输入对应的 `out/doc/` 中查找 `_tree.html`；存在多个文件时先选择，再使用 Webview 打开。            |
-|                    | `HW Tool: Insert CSR Register Row...`              | 当前文件为 CSR Markdown            | 只选择一次 `reg_type`，随后在当前行后插入对应的 `reg_define` 默认行，由用户直接修改表格内容。           |
-| **rtl_flist_mgr**  | `HW Tool: Generate RTL Filelist...`                | 当前或 Explorer 选中 `.toml/.core` | 选择 `sim/synth/lint/emu/fpga`，刷新 core 索引并生成到 core 旁的 `out/flist/`。                         |
-|                    | `HW Tool: Refresh RTL Core List`                   | 已打开文件、Terminal 或 workspace  | 扫描推断出的 workspace，在 Explorer 的 `RTL Cores` 视图列出本体 core；单击条目打开 corefile。           |
-| **git_repo_mgr**   | `HW Tool: Git Repository Status`                   | 当前 Git workspace                 | 在 HW Tool Output 中汇总 top 与 import checkout 的 commit、dirty、missing 状态。                        |
-|                    | `HW Tool: Sync Git Repositories...`                | 当前 Git workspace                 | 选择 full/shallow clone 并二次确认后递归同步；已有 checkout 不重复维护。                                |
-|                    | `HW Tool: Open Git Dependency Graph...`            | 已执行过 sync                      | 选择只读 tree 或 JSON，在临时编辑器中查看 `.git_repo` 保存的依赖图。                                    |
+| 工具/功能组        | VS Code 命令或入口                                 | 使用条件                           | 说明                                                                                                       |
+| ------------------ | -------------------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **通用功能**       | `HW Tool: Open Tool Documentation...`              | Python 环境依赖已安装              | 从已注册工具中选择 README，转换为 HTML 后在 Webview 中打开。                                               |
+|                    | `HW Tool: Change Preview Theme...`                 | 无                                 | 设置文档和 Markdown HTML 预览主题，可选 `Light`、`Dark` 或 `Follow VS Code`。                              |
+|                    | `HW Tool: Convert Markdown to HTML...`             | 当前文件为 `.md/.markdown`         | 自动生成 TOC 并补章节编号，在 Markdown 同目录输出同名 `.html`，随后在 Webview 中打开；已有输出仍确认覆盖。 |
+|                    | `HW Tool: Preview Markdown as HTML...`             | 当前文件为 `.md/.markdown`         | 自动生成 TOC 并补章节编号，直接在 Webview 中预览，不写 HTML；未保存的 Markdown 先保存。                    |
+| **py_rtl_snippet** | 输入 `rtl-` 前缀                                   | 当前文件为 `.v/.sv`                | 由 VS Code 原生补全列出代码片段；`rtl-inst-<module>` 提供发布时固化的常用 `com` module 例化。              |
+| **rtl_inst**       | `HW Tool: Replace Selected RTL Path With Instance` | `.v/.sv` 中选中绝对 RTL 路径       | 调用 `rtl_inst --stdout`，成功后用 instance snippet 一次性替换选区；失败时选区保持不变。                   |
+|                    | `HW Tool: Insert RTL Instance From File...`        | 当前文件为 `.v/.sv`                | 图形选择一个 `.v/.sv` 文件，在当前光标位置插入 instance snippet。                                          |
+|                    | `HW Tool: Copy RTL Instance`                       | 当前或 Explorer 选中 `.v/.sv`      | 自动使用当前文件或 Explorer 右键文件，生成 instance 并写入剪贴板，用户使用 `Ctrl+V` 粘贴。                 |
+| **rtl_dummy**      | `HW Tool: Generate RTL Dummy...`                   | 当前或 Explorer 选中 `.v/.sv`      | 只选择一次 `bbox/stub/port_swap`，生成到源文件旁的 `out/rtl_dummy/`，随后打开结果文件。                    |
+| **gen_tb**         | `HW Tool: Generate Empty TB Environment`           | 当前 Terminal 可提供 cwd           | 在 Terminal cwd 的 `out/sim/` 生成空 TB 环境；完成后可打开 README 或在生成目录打开 Terminal。              |
+|                    | `HW Tool: Generate TB From Current Filelist...`    | 当前或 Explorer 选中 `.f`          | 只输入一次 DUT top module，在 filelist 同目录的 `out/sim/` 生成 TB 环境。                                  |
+| **mem_tool**       | `HW Tool: Open Memory Tool Documentation`          | Python 环境依赖已安装              | 将插件内置的 `mem_tool/README.md` 转换为 HTML，并在 Webview 中打开。                                       |
+|                    | `HW Tool: Generate Memory Shell...`                | 当前 Terminal 可提供 cwd           | 只输入一次 subsystem prefix，在 Terminal cwd 的 `out/mem_tool/` 执行 `init` 并打开生成的 shell。           |
+|                    | `HW Tool: Integrate Memory From Excel`             | 当前或 Explorer 选中 `.xlsx`       | 输入 SRAM shell prefix，执行 `inst` 并打开集成 PHY instance 后的 memory shell。                            |
+| **csr_tool**       | `HW Tool: Open CSR Documentation`                  | Python 环境依赖已安装              | 将插件内置的 `csr_tool/README.md` 转换为 HTML，并在 Webview 中打开。                                       |
+|                    | `HW Tool: Create CSR Template...`                  | 已打开 Terminal、文件或工程        | 四选一生成 Markdown/Excel 模板，并可选择是否包含 `base_info`；文件名固定为 `reg_define.md/.xlsx`。         |
+|                    | `HW Tool: Create Default CSR Template`             | 已打开 Terminal、文件或工程        | 不弹出选项，直接生成仅包含 `reg_define` 的 `reg_define.md`。                                               |
+|                    | `HW Tool: Generate CSR (Single)`                   | 当前文件为 CSR `.md/.xlsx`         | 保存当前输入并生成单模块 CSR，固定输出到输入文件同目录的 `out/`。                                          |
+|                    | `HW Tool: Generate CSR (Nested)`                   | 当前文件为 CSR `.md/.xlsx`         | 以 `--nested` 模式生成多层 CSR，固定输出到输入文件同目录的 `out/`；完成后可直接打开 `_tree.html`。         |
+|                    | `HW Tool: Open CSR Tree HTML`                      | 当前文件为 CSR `.md/.xlsx`         | 在当前输入对应的 `out/doc/` 中查找 `_tree.html`；存在多个文件时先选择，再使用 Webview 打开。               |
+|                    | `HW Tool: Insert CSR Register Row...`              | 当前文件为 CSR Markdown            | 只选择一次 `reg_type`，随后在当前行后插入对应的 `reg_define` 默认行，由用户直接修改表格内容。              |
+| **rtl_flist_mgr**  | `HW Tool: Generate RTL Filelist...`                | 当前或 Explorer 选中 `.toml/.core` | 选择 `sim/synth/lint/emu/fpga`，刷新 core 索引并生成到 core 旁的 `out/flist/`。                            |
+|                    | `HW Tool: Refresh RTL Core List`                   | 已打开文件、Terminal 或 workspace  | 扫描推断出的 workspace，在 Explorer 的 `RTL Cores` 视图列出本体 core；单击条目打开 corefile。              |
+| **git_repo_mgr**   | `HW Tool: Git Repository Status`                   | 当前 Git workspace                 | 在 HW Tool Output 中汇总 top 与 import checkout 的 commit、dirty、missing 状态。                           |
+|                    | `HW Tool: Sync Git Repositories...`                | 当前 Git workspace                 | 选择 full/shallow clone 并二次确认后递归同步；已有 checkout 不重复维护。                                   |
+|                    | `HW Tool: Open Git Dependency Graph...`            | 已执行过 sync                      | 选择只读 tree 或 JSON，在临时编辑器中查看 `.git_repo` 保存的依赖图。                                       |
 
 CSR 模板优先生成到当前激活 Terminal 的工作目录。Terminal 未启用 Shell Integration、无法报告当前目录时，依次回退到当前文件目录和 workspace 根目录。Markdown 生成后在 VS Code 中打开；Excel 生成后使用系统默认的 Office/WPS 打开，以保留数据验证下拉菜单。
 

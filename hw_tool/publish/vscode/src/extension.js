@@ -324,25 +324,6 @@ async function convertMarkdownToHtml(resource, output, context, previewOnly = fa
     if (!sourceUri) {
         return;
     }
-    const choice = await vscode.window.showQuickPick(
-        [
-            {
-                label: "HTML",
-                description: "Convert without an automatic table of contents",
-                toc: false
-            },
-            {
-                label: "HTML with TOC",
-                description: "Insert an automatic table of contents",
-                toc: true
-            }
-        ],
-        { placeHolder: "Choose Markdown conversion mode" }
-    );
-    if (!choice) {
-        return;
-    }
-
     const sourcePath = sourceUri.fsPath;
     const outputPath = sourcePath.replace(/\.(md|markdown)$/i, ".html");
     if (!previewOnly && !(await confirmTemplateOverwrite(outputPath))) {
@@ -362,9 +343,7 @@ async function convertMarkdownToHtml(resource, output, context, previewOnly = fa
             sourcePath
         ];
         args.push(...(previewOnly ? ["--stdout"] : ["-o", outputPath]));
-        if (choice.toc) {
-            args.push("--toc");
-        }
+        args.push("--toc", "--number-headings");
         args.push("--theme", previewTheme(sourceUri));
         const result = await vscode.window.withProgress(
             {
