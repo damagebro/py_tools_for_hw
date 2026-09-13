@@ -3,8 +3,15 @@
     "displayName": "HW Tool",
     "description": "VS Code integration for the DMG hardware development tools.",
     "version": "0.4.0",
-    "publisher": "dmg",
-    "license": "UNLICENSED",
+    "publisher": "damagebro",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/damagebro/py_tools_for_hw.git",
+        "directory": "hw_tool/publish/vscode"
+    },
+    "homepage": "https://github.com/damagebro/py_tools_for_hw/tree/main/hw_tool/publish/vscode",
+    "bugs": { "url": "https://github.com/damagebro/py_tools_for_hw/issues" },
     "engines": {
         "vscode": "^1.85.0"
     },

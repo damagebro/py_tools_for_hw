@@ -71,8 +71,12 @@ def vsix_manifest(metadata: dict[str, object]) -> str:
     <DisplayName>{display_name}</DisplayName>
     <Description xml:space=\"preserve\">{description}</Description>
     <Categories>Snippets,Other</Categories>
+    <GalleryFlags>Public</GalleryFlags>
+    <License>extension/LICENSE.md</License>
     <Properties>
       <Property Id=\"Microsoft.VisualStudio.Code.Engine\" Value=\"{engine}\" />
+      <Property Id=\"Microsoft.VisualStudio.Code.ExtensionKind\" Value=\"workspace\" />
+      <Property Id=\"Microsoft.VisualStudio.Services.Links.Source\" Value=\"https://github.com/damagebro/py_tools_for_hw\" />
     </Properties>
   </Metadata>
   <Installation>
@@ -81,6 +85,8 @@ def vsix_manifest(metadata: dict[str, object]) -> str:
   <Dependencies />
   <Assets>
     <Asset Type=\"Microsoft.VisualStudio.Code.Manifest\" Path=\"extension/package.json\" Addressable=\"true\" />
+    <Asset Type=\"Microsoft.VisualStudio.Services.Content.Details\" Path=\"extension/README.md\" Addressable=\"true\" />
+    <Asset Type=\"Microsoft.VisualStudio.Services.Content.License\" Path=\"extension/LICENSE.md\" Addressable=\"true\" />
   </Assets>
 </PackageManifest>
 """.format(**values)
