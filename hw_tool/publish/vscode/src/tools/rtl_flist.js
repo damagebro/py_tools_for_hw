@@ -2,7 +2,8 @@ const fs = require("fs/promises");
 const path = require("path");
 const vscode = require("vscode");
 const { runHwTool } = require("../hw_tool_client");
-const { contextDirectory, findRtlFlistWorkspace } = require("../workspace_context");
+const { contextDirectory } = require("../workspace_context");
+const { resolveRtlRoot, selectRtlRoot } = require("./rtl_root");
 
 
 const CORE_SUFFIXES = new Set([".toml", ".core"]);
@@ -117,7 +118,25 @@ async function generateFlist(resource, context, output) {
         if (!(await confirmOverwrite(outputPath))) {
             return;
         }
-        const workspace = await findRtlFlistWorkspace(path.dirname(corePath));
+        const workspace = await resolveRtlRoot(path.dirname(corePath), coreUri, context, output);
+        if (!workspace) {
+            return;
+        }
+        const listing = await runHwTool(
+            context,
+            ["rtl_flist_mgr", "--list-core", "--all", "-w", workspace, "--rescan"],
+            { cwd: workspace, output, processName: "rtl_flist_mgr --list-core", echoStdout: false, resource: coreUri }
+        );
+        const realCorePath = await fs.realpath(corePath);
+        const matches = [];
+        for (const item of parseCoreList(listing.stdout, workspace)) {
+            if (await fs.realpath(item.manifest) === realCorePath) {
+                matches.push(item);
+            }
+        }
+        if (matches.length !== 1) {
+            throw new Error("Selected file does not identify exactly one indexed RTL core.");
+        }
         await fs.mkdir(path.dirname(outputPath), { recursive: true });
         await vscode.window.withProgress(
             {
@@ -129,12 +148,12 @@ async function generateFlist(resource, context, output) {
                 context,
                 [
                     "rtl_flist_mgr",
-                    corePath,
+                    "--core",
+                    matches[0].coreId,
                     "-w",
                     workspace,
                     "-m",
                     mode.label,
-                    "--rescan",
                     "-o",
                     outputPath
                 ],
@@ -163,14 +182,17 @@ async function generateFlist(resource, context, output) {
 }
 
 
-async function refreshCoreList(resource, provider, context, output) {
-    const start = await contextDirectory(resource);
+async function refreshCoreList(resource, provider, context, output, selectedRoot) {
+    const start = selectedRoot || await contextDirectory(resource);
     if (!start) {
         vscode.window.showWarningMessage("Open a file, Terminal, or workspace first.");
         return;
     }
-    const workspace = await findRtlFlistWorkspace(start);
     try {
+        const workspace = selectedRoot || await resolveRtlRoot(start, resource || vscode.window.activeTextEditor?.document.uri, context, output);
+        if (!workspace) {
+            return;
+        }
         const result = await vscode.window.withProgress(
             {
                 location: vscode.ProgressLocation.Notification,
@@ -211,6 +233,23 @@ function registerRtlFlistCommands(context, output) {
     const provider = new RtlCoreTreeProvider();
     return [
         vscode.window.registerTreeDataProvider("dmgHwTool.rtlCores", provider),
+        vscode.commands.registerCommand(
+            "dmgHwTool.rtlFlist.setRoot",
+            async (resource) => {
+                try {
+                    const uri = resource || vscode.window.activeTextEditor?.document.uri;
+                    const root = await selectRtlRoot(await contextDirectory(uri), uri, context, output);
+                    if (root) {
+                        provider.setItems(root, []);
+                        await refreshCoreList(uri, provider, context, output, root);
+                    }
+                }
+                catch (error) {
+                    output.appendLine(`[ERROR] ${error.message}`);
+                    vscode.window.showErrorMessage(`Failed to set RTL root: ${error.message}`);
+                }
+            }
+        ),
         vscode.commands.registerCommand(
             "dmgHwTool.rtlFlist.generate",
             (resource) => generateFlist(resource, context, output)

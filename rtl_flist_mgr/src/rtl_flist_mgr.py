@@ -9,7 +9,7 @@ import sys
 import tomllib
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 
@@ -154,12 +154,51 @@ def load_workspace(workspace_arg: str) -> tuple[Path, tuple[WorkspaceRepository,
 
 def find_workspace_root(start: Path) -> tuple[Path, str]:
     current = start.resolve()
+    markers = []
+    candidates = []
     for candidate in (current, *current.parents):
-        if (candidate / STATE_DIR).is_dir():
-            return candidate, STATE_DIR
-        if (candidate / "import").is_dir():
-            return candidate, "import"
-    return current, "current directory"
+        if (candidate / STATE_DIR / "workspace.toml").is_file():
+            markers.append(candidate)
+        evidence = []
+        if (candidate / STATE_DIR / "core_index.toml").is_file():
+            evidence.append("core_index.toml")
+        if (candidate / ".git").exists() and (candidate / "import").is_dir():
+            evidence.append(".git + import/")
+        if evidence:
+            candidates.append(f"candidate: {candidate} ({', '.join(evidence)})")
+    if len(markers) > 1:
+        raise FlistError("E_ROOT_AMBIGUOUS", "multiple workspace markers; specify -w <root>", tuple(str(p) for p in markers))
+    if markers:
+        marker = markers[0] / STATE_DIR / "workspace.toml"
+        if read_toml(marker, "workspace marker").get("schema_version") != 1:
+            raise FlistError("E_ROOT_MARKER", f"unsupported workspace marker: {marker}")
+        return markers[0], ".rtl_flist/workspace.toml"
+    raise FlistError("E_ROOT_REQUIRED", "no workspace marker; specify -w <root> or initialize with --init-root -w <root>", tuple(candidates))
+
+
+def workspace_selection(workspace_arg: str | None) -> tuple[Path, str]:
+    if workspace_arg is not None:
+        root = Path(workspace_arg).resolve()
+        if not root.is_dir():
+            raise FlistError("E_WORKSPACE", f"workspace directory not found: {root}")
+        return root, "--workspace"
+    return find_workspace_root(Path.cwd())
+
+
+def command_root(args: argparse.Namespace) -> int:
+    root, source = workspace_selection(args.workspace)
+    if args.init_root:
+        marker = root / STATE_DIR / "workspace.toml"
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        if marker.exists():
+            if read_toml(marker, "workspace marker").get("schema_version") != 1:
+                raise FlistError("E_ROOT_MARKER", f"unsupported workspace marker: {marker}")
+        else:
+            with marker.open("x", encoding="utf-8") as stream:
+                stream.write("schema_version = 1\n")
+        source = ".rtl_flist/workspace.toml"
+    print(f"root_dir: {root} ({source})")
+    return 0
 
 
 def iter_descriptors(
@@ -221,9 +260,14 @@ def parse_toml_core(path: Path, git_root: Path) -> Core | None:
             raise FlistError("E_MANIFEST", f"first: is not supported in fileset.{name}.legacy_f: {path}")
         if not files and legacy_f is None and not depend:
             raise FlistError("E_MANIFEST", f"fileset '{name}' has no files, depend, or legacy_f: {path}")
+        directory = string_optional(raw.get("dir"), f"fileset.{name}.dir", path)
+        if directory is not None and (
+            Path(directory).is_absolute() or PureWindowsPath(directory).drive or PureWindowsPath(directory).root
+        ):
+            raise FlistError("E_MANIFEST", f"fileset.{name}.dir must be relative to the TOML directory: {path}: {directory}")
         filesets[name] = FileSet(
             name=name,
-            directory=string_optional(raw.get("dir"), f"fileset.{name}.dir", path),
+            directory=directory,
             files=files,
             depend=depend,
             legacy_f=legacy_f,
@@ -486,24 +530,22 @@ def _condition_term(term: str, active_flags: frozenset[str], value: str, source:
     return not enabled if matched.group("neg") else enabled
 
 
-def substitute_variables(value: str, variables: dict[str, str], source: Path) -> str:
+def substitute_variables(value: str, variables: dict[str, str], source: Path, preserve_unknown: bool = False) -> str:
     def replace(match: re.Match[str]) -> str:
         name = match.group("braced") or match.group("plain")
         assert name is not None
         replacement = variables.get(name)
         if replacement is None:
+            if preserve_unknown:
+                return match.group(0)
             raise FlistError("E_VARIABLE", f"undefined variable '{name}' in {source}")
         return replacement
     return VARIABLE_RE.sub(replace, value)
 
 
-def resolve_local_path(value: str, base: Path, git_root: Path, variables: dict[str, str], source: Path) -> Path:
+def resolve_local_path(value: str, base: Path, variables: dict[str, str], source: Path) -> Path:
     path = Path(substitute_variables(value, variables, source))
     result = path.resolve() if path.is_absolute() else (base / path).resolve()
-    try:
-        result.relative_to(git_root)
-    except ValueError as exc:
-        raise FlistError("E_PATH", f"path escapes git_root in {source}: {value}") from exc
     return result
 
 
@@ -518,14 +560,15 @@ class Resolver:
         self.cores = cores
         self.mode = mode
         self.active_flags = MODE_FLAGS[mode]
-        self.variables = variables
+        self.legacy_variables = variables
+        self.variables = dict(os.environ) | variables
         self.cached_index = cached_index
         self.first_lines: list[OutputLine] = []
         self.lines: list[OutputLine] = []
         self.emitted_files: dict[Path, tuple[OutputLine, bool]] = {}
         self.first_path_by_name: dict[str, Path] = {}
         self.warned_file_names: set[str] = set()
-        self.emitted_options: dict[tuple[str, str], tuple[OutputLine, bool]] = {}
+        self.emitted_options: set[tuple[str, str]] = set()
         self.visited: set[str] = set()
         self.active: list[str] = []
         self.tree_edges: list[tuple[str, str]] = []
@@ -560,25 +603,27 @@ class Resolver:
             raise FlistError("E_FILESET", f"core '{core.core_id}' has no fileset '{fileset_name}'")
         for dependency_value in fileset.depend:
             self.resolve_dependency(core, dependency_value)
-        base = core.git_root / fileset.directory if fileset.directory is not None else core.manifest.parent
+        base = core.manifest.parent / (fileset.directory or ".")
         base = base.resolve()
         for file_name in fileset.files:
             selected = condition_value(file_name, self.active_flags, core.manifest)
             if selected is not None:
                 selected, first_file = split_first_marker(selected, core.manifest)
                 self.emit_file(
-                    resolve_local_path(selected, base, core.git_root, self.variables, core.manifest),
+                    resolve_local_path(selected, base, self.variables, core.manifest),
                     core,
                     first_fileset or first_file,
                 )
         if fileset.legacy_f is not None:
             selected = condition_value(fileset.legacy_f, self.active_flags, core.manifest)
             if selected is not None:
+                selected = substitute_variables(selected, self.legacy_variables, core.manifest, preserve_unknown=True)
+                if VARIABLE_RE.search(selected):
+                    self.emit_option("raw", "-f " + selected, core)
+                    return
                 self.resolve_legacy_f(
                     resolve_legacy_path(selected, base, self.variables, core.manifest),
                     core,
-                    (),
-                    first_fileset,
                 )
 
     def resolve_dependency(self, parent: Core, dependency_value: str) -> None:
@@ -590,9 +635,10 @@ class Resolver:
         self.tree_edges.append((parent.core_id, dependency_id))
         self.resolve_core(dependency_id)
 
-    def resolve_legacy_f(self, path: Path, core: Core, stack: tuple[Path, ...], first_output: bool) -> None:
+    def resolve_legacy_f(self, path: Path, core: Core, stack: tuple[Path, ...] = ()) -> None:
+        path = path.resolve()
         if path in stack:
-            raise FlistError("E_LEGACY_CYCLE", f"legacy_f include cycle: {path}")
+            raise FlistError("E_LEGACY_CYCLE", "legacy_f include cycle", tuple(str(p) for p in (*stack, path)))
         try:
             raw_lines = path.read_text(encoding="utf-8").splitlines()
         except OSError as exc:
@@ -601,57 +647,55 @@ class Resolver:
             line = raw.split("#", maxsplit=1)[0].strip()
             if not line or line.startswith("//"):
                 continue
+            line = substitute_variables(line, self.legacy_variables, path, preserve_unknown=True)
+            if line.startswith(("-y", "+libext+", "-work", "-L ")):
+                raise FlistError("E_LEGACY_F", f"unsupported legacy_f option in {path}: {line}")
+            if VARIABLE_RE.search(line):
+                self.emit_option("raw", line, core)
+                continue
             if line.startswith("+incdir+"):
                 for item in line[len("+incdir+"):].split("+"):
                     if item:
-                        self.emit_option("incdir", str(resolve_legacy_path(item, path.parent, self.variables, path)), core, first_output)
+                        self.emit_option("incdir", str(resolve_legacy_path(item, path.parent, self.variables, path)), core)
                 continue
             if line.startswith("+define+"):
                 for item in line[len("+define+"):].split("+"):
                     if item:
-                        self.emit_option("define", item, core, first_output)
+                        self.emit_option("define", substitute_variables(item, self.variables, path), core)
                 continue
-            if line.startswith(("-f ", "-F ")):
+            if line.startswith(("-f ", "-F ", "-f\t", "-F\t")):
                 self.resolve_legacy_f(
                     resolve_legacy_path(line[3:].strip(), path.parent, self.variables, path),
-                    core,
-                    (*stack, path),
-                    first_output,
+                    core, (*stack, path),
                 )
                 continue
+            if line in {"-f", "-F"}:
+                raise FlistError("E_LEGACY_F", f"{line} requires one filelist in {path}")
             if line == "-v" or line.startswith(("-v ", "-v\t")):
-                library_file = line[2:].strip()
-                if not library_file:
+                value = line[2:].strip()
+                if not value:
                     raise FlistError("E_LEGACY_F", f"-v requires one Verilog file in {path}")
-                self.emit_library_file(resolve_legacy_path(library_file, path.parent, self.variables, path), core, first_output)
+                library = resolve_legacy_path(value, path.parent, self.variables, path)
+                if not library.is_file():
+                    raise FlistError("E_FILE_MISSING", f"Verilog library file not found: {library}")
+                self.emit_option("vfile", str(library), core)
                 continue
             if line.startswith(("-y", "+libext+", "-work", "-L ")):
                 raise FlistError("E_LEGACY_F", f"unsupported legacy_f option in {path}: {line}")
-            self.emit_file(resolve_legacy_path(line, path.parent, self.variables, path), core, first_output)
+            self.emit_file(resolve_legacy_path(line, path.parent, self.variables, path), core, False)
 
-    def emit_option(self, kind: str, value: str, core: Core, first_output: bool) -> None:
+    def emit_option(self, kind: str, value: str, core: Core) -> None:
         key = (kind, value)
-        previous = self.emitted_options.get(key)
-        if previous is not None:
-            line, previous_first = previous
-            if first_output and not previous_first:
-                self.lines.remove(line)
-                self.first_lines.append(line)
-                self.emitted_options[key] = (line, True)
+        if key in self.emitted_options:
             return
-        line = OutputLine(kind, value, core.git_root, core.core_id, core.manifest)
-        self.emitted_options[key] = (line, first_output)
-        (self.first_lines if first_output else self.lines).append(line)
+        self.emitted_options.add(key)
+        self.lines.append(OutputLine(kind, value, core.git_root, core.core_id, core.manifest))
 
     def emit_file(self, path: Path, core: Core, first_output: bool) -> None:
         if not path.is_file():
             raise FlistError("E_FILE_MISSING", f"RTL file not found: {path}", (f"core: {core.core_id}",))
         self._emit_file(path, core.git_root, core.core_id, core.manifest, first_output)
 
-    def emit_library_file(self, path: Path, core: Core, first_output: bool) -> None:
-        if not path.is_file():
-            raise FlistError("E_FILE_MISSING", f"Verilog library file not found: {path}", (f"core: {core.core_id}",))
-        self.emit_option("vfile", str(path), core, first_output)
 
     def _emit_file(self, path: Path, root: Path | None, core_id: str, manifest: Path, first_output: bool) -> None:
         previous = self.emitted_files.get(path)
@@ -709,37 +753,18 @@ def parse_variables(values: list[str]) -> dict[str, str]:
     return variables
 
 
-def rootvar_name(core_id: str) -> str:
-    return "CORE_ROOT_" + re.sub(r"[^A-Za-z0-9_]", "_", core_id).upper()
-
-
-def format_path(line: OutputLine, workspace: Path, output: Path, style: str) -> str:
-    path = Path(line.value)
-    if style == "absolute" or line.root is None:
-        return path.as_posix()
-    if style == "relative":
-        return os.path.relpath(path, output.parent).replace("\\", "/")
-    if line.root == workspace:
-        relative = path.relative_to(workspace).as_posix()
-        return "${PROJECT_ROOT}" if relative == "." else f"${{PROJECT_ROOT}}/{relative}"
-    try:
-        return f"${{{rootvar_name(line.core_id)}}}/{path.relative_to(line.root).as_posix()}"
-    except ValueError:
-        return path.as_posix()
-
-
-def render_flist(lines: tuple[OutputLine, ...], workspace: Path, output: Path, style: str) -> str:
-    rendered: list[str] = []
+def render_flist(lines: tuple[OutputLine, ...]) -> str:
+    chunks = []
     for line in lines:
-        if line.kind == "file":
-            rendered.append(format_path(line, workspace, output, style))
-        elif line.kind == "incdir":
-            rendered.append(f"+incdir+{format_path(line, workspace, output, style)}")
-        elif line.kind == "vfile":
-            rendered.append(f"-v {format_path(line, workspace, output, style)}")
+        if line.kind == "raw":
+            value = line.value
+        elif line.kind == "define":
+            value = "+define+" + line.value
         else:
-            rendered.append(f"+define+{line.value}")
-    return "\n".join(rendered) + "\n"
+            prefix = {"file": "", "incdir": "+incdir+", "vfile": "-v "}[line.kind]
+            value = prefix + Path(line.value).as_posix()
+        chunks.append(value if value.endswith("\n") else value + "\n")
+    return "".join(chunks)
 
 
 def build_resolver(
@@ -754,25 +779,31 @@ def build_resolver(
     return workspace, cores, Resolver(workspace, cores, mode, variables, cache_source == "cache"), cache_source
 
 
-def core_from_file(core_file: str, workspace: Path, cores: dict[str, Core]) -> Core:
-    path = Path(core_file)
-    descriptor = path.resolve() if path.is_absolute() else (workspace / path).resolve()
-    if not descriptor.is_file():
-        raise FlistError("E_CORE_FILE", f"core file not found: {descriptor}")
-    for core in cores.values():
-        if core.manifest == descriptor:
-            return core
-    raise FlistError("E_CORE_FILE", f"core file is not a recognized core manifest: {descriptor}")
+def core_from_name(name: str, cores: dict[str, Core]) -> Core:
+    if name in cores:
+        return cores[name]
+    matches = sorted(
+        (core for core in cores.values() if ":" not in name and core.core_id.split(":")[2:3] == [name]),
+        key=lambda core: core.core_id,
+    )
+    if not matches:
+        raise FlistError("E_CORE_NOT_FOUND", f"core ID/name not found: {name}; use --list-core --all or --rescan")
+    if len(matches) > 1:
+        raise FlistError("E_CORE_AMBIGUOUS", f"core name '{name}' is ambiguous; use a full core ID", tuple(
+            f"  {core.core_id}  {core.manifest}" for core in matches
+        ))
+    return matches[0]
 
 
 def command_generate(args: argparse.Namespace) -> int:
-    workspace_arg = args.workspace or "."
-    workspace, cores, resolver, cache_source = build_resolver(workspace_arg, args.mode, parse_variables(args.variables), args.rescan)
-    core = core_from_file(args.core_file, workspace, cores)
+    root, root_source = workspace_selection(args.workspace)
+    print(f"root_dir: {root} ({root_source})")
+    workspace, cores, resolver, cache_source = build_resolver(str(root), args.mode, parse_variables(args.variables), args.rescan)
+    core = core_from_name(args.core, cores)
     output = Path(args.output).resolve()
     lines = resolver.resolve(core.core_id)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(render_flist(lines, workspace, output, args.path_style), encoding="utf-8")
+    output.write_text(render_flist(lines), encoding="utf-8")
     (workspace / STATE_DIR / "core_tree.txt").write_text(resolver.tree_text(core.core_id), encoding="utf-8")
     print(f"core_index: {core_index_path(workspace)} ({cache_source})")
     print(f"resolved {len(lines)} line(s): {output}")
@@ -789,21 +820,18 @@ def command_list_core(args: argparse.Namespace) -> int:
         display_root = directory
         root_source = "--directory"
     else:
-        if args.workspace:
-            workspace_arg = args.workspace
-            root_source = "--workspace"
-        else:
-            workspace, root_source = find_workspace_root(Path.cwd())
-            workspace_arg = str(workspace)
-        workspace, repositories = load_workspace(workspace_arg)
+        root, root_source = workspace_selection(args.workspace)
+        print(f"root_dir: {root} ({root_source})")
+        workspace, repositories = load_workspace(str(root))
         entries, cache_source = load_or_scan_core_index(workspace, repositories, args.rescan)
         cores = {
             core_id: entry
             for core_id, entry in entries.items()
-            if entry.git_root == workspace
+            if args.all or entry.git_root == workspace
         }
         display_root = workspace
-    print(f"root_dir: {display_root} ({root_source})")
+    if args.directory:
+        print(f"root_dir: {display_root} ({root_source})")
     if not args.directory:
         print(f"core_index: {core_index_path(display_root)} ({cache_source})")
     for core_id in sorted(cores):
@@ -813,35 +841,50 @@ def command_list_core(args: argparse.Namespace) -> int:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate a deterministic RTL filelist from one core file.")
+    parser = argparse.ArgumentParser(description="Generate a deterministic RTL filelist from a core ID or unique name.")
     parser.add_argument("--version", action="version", version="rtl_flist_mgr 0.11.0")
-    parser.add_argument("core_file", nargs="?", help="top core TOML or legacy .core file")
+    parser.add_argument("--core", help="full core ID or unique name (third ID segment)")
     parser.add_argument("-w", "--workspace", help="workspace root; import/* directories are scanned as checkout roots")
     parser.add_argument("-m", "--mode", choices=tuple(MODE_FLAGS), default="sim", help="output mode, default: sim")
     parser.add_argument("--var", dest="variables", action="append", default=[], help="legacy path variable NAME=VALUE")
     parser.add_argument("-o", "--output", help="generated filelist path")
-    parser.add_argument("--path-style", choices=("relative", "absolute", "rootvar"), default="absolute")
+    parser.add_argument("--show-root", action="store_true", help="show root without scanning or writing state")
+    parser.add_argument("--init-root", action="store_true", help="create workspace marker; requires -w")
     parser.add_argument("--rescan", action="store_true", help="rescan workspace corefiles and overwrite .rtl_flist/core_index.toml")
     parser.add_argument("-d", "--directory", help="directory for --list-core; recursively list core IDs below it")
     parser.add_argument("--list-core", action="store_true", help="list workspace core IDs outside import/")
+    parser.add_argument("--all", action="store_true", help="include import/ cores with --list-core")
     args = parser.parse_args(argv)
-    if args.list_core:
-        if args.core_file is not None or args.output is not None:
-            parser.error("--list-core does not accept core_file or --output")
+    if args.show_root or args.init_root:
+        if args.show_root and args.init_root:
+            parser.error("--show-root and --init-root are mutually exclusive")
+        if args.core or args.output or args.list_core or args.directory or args.all or args.rescan or args.variables:
+            parser.error("root commands do not accept generation or listing options")
+        if args.init_root and args.workspace is None:
+            parser.error("--init-root requires -w <root>")
+    elif args.list_core:
+        if args.core is not None or args.output is not None:
+            parser.error("--list-core does not accept --core or --output")
+        if args.all and args.directory is not None:
+            parser.error("--all and --directory cannot be used together")
         if args.directory is not None and args.workspace is not None:
             parser.error("--directory and --workspace cannot be used together with --list-core")
         if args.directory is not None and args.rescan:
             parser.error("--rescan cannot be used with --directory")
-    elif args.core_file is None or args.output is None:
-        parser.error("core_file and --output are required unless --list-core is used")
+    elif args.core is None or args.output is None:
+        parser.error("--core and --output are required unless --list-core is used")
     elif args.directory is not None:
         parser.error("--directory requires --list-core")
+    elif args.all:
+        parser.error("--all requires --list-core")
     return args
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
+        if args.show_root or args.init_root:
+            return command_root(args)
         return command_list_core(args) if args.list_core else command_generate(args)
     except FlistError as exc:
         print(f"ERROR [{exc.code}]: {exc.message}", file=sys.stderr)

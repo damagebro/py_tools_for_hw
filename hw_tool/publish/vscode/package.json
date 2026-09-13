@@ -35,6 +35,7 @@
         "onCommand:dmgHwTool.memTool.init",
         "onCommand:dmgHwTool.memTool.inst",
         "onCommand:dmgHwTool.rtlFlist.generate",
+        "onCommand:dmgHwTool.rtlFlist.setRoot",
         "onCommand:dmgHwTool.rtlFlist.refreshCores",
         "onCommand:dmgHwTool.gitRepo.status",
         "onCommand:dmgHwTool.gitRepo.sync",
@@ -126,6 +127,11 @@
             {
                 "command": "dmgHwTool.rtlFlist.generate",
                 "title": "HW Tool: Generate RTL Filelist..."
+            },
+            {
+                "command": "dmgHwTool.rtlFlist.setRoot",
+                "title": "HW Tool: Set RTL Workspace Root...",
+                "icon": "$(folder-opened)"
             },
             {
                 "command": "dmgHwTool.rtlFlist.refreshCores",
@@ -267,6 +273,11 @@
             ],
             "view/title": [
                 {
+                    "command": "dmgHwTool.rtlFlist.setRoot",
+                    "when": "view == dmgHwTool.rtlCores",
+                    "group": "navigation@0"
+                },
+                {
                     "command": "dmgHwTool.rtlFlist.refreshCores",
                     "when": "view == dmgHwTool.rtlCores",
                     "group": "navigation"
@@ -294,6 +305,12 @@
         "configuration": {
             "title": "HW Tool",
             "properties": {
+                "dmgHwTool.rtlFlist.rootDir": {
+                    "type": "string",
+                    "default": "",
+                    "scope": "resource",
+                    "description": "Explicit absolute RTL workspace root. Overrides automatic marker discovery."
+                },
                 "dmgHwTool.pythonPath": {
                     "type": "string",
                     "default": "python",
@@ -319,7 +336,7 @@
     },
     "scripts": {
         "check": "node --check src/extension.js && node --check src/hw_tool_client.js && node --check src/editor_context.js && node --check src/workspace_context.js && node --check src/tools/rtl_inst.js && node --check src/tools/rtl_dummy.js && node --check src/tools/gen_tb.js && node --check src/tools/mem_tool.js && node --check src/tools/rtl_flist.js && node --check src/tools/git_repo.js",
-        "test": "node test/test_helpers.js",
+        "test": "node test/test_helpers.js && node test/test_rtl_root.js",
         "sync-snippets": "python scripts/sync_resources.py",
         "sync-runtime": "python scripts/sync_runtime.py",
         "package": "npm run check && npm test && npm run sync-snippets && npm run sync-runtime && python scripts/pack_vsix.py"

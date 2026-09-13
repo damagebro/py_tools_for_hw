@@ -16,32 +16,52 @@
 
 ## 常用命令
 
+以下命令在 `rtl_flist_mgr/` 工具目录运行。`src/rtl_flist_mgr.py` 可独立执行，不依赖 Hub；操作其他项目时通过 `-w <workspace>` 指定 root。
+
 ```bash
+# 初始化 / 查询 root
+python -B src/rtl_flist_mgr.py --init-root -w <root>
+python -B src/rtl_flist_mgr.py --show-root
+
 # 默认 sim 模式
-python -B src/rtl_flist_mgr.py <core_file> -o <output.f>
+python -B src/rtl_flist_mgr.py --core <core_id/name> -o <output.f>
+
+# 按完整 core ID 或唯一 name 生成
+python -B src/rtl_flist_mgr.py --core dmg:cpu:subsys -w <workspace> -o cpu.f
+python -B src/rtl_flist_mgr.py --core subsys -w <workspace> -o cpu.f
 
 # 综合或 lint filelist
-python -B src/rtl_flist_mgr.py <core_file> -m synth -o <output.f>
-python -B src/rtl_flist_mgr.py <core_file> -m lint  -o <output.f>
+python -B src/rtl_flist_mgr.py --core <core_id/name> -m synth -o <output.f>
+python -B src/rtl_flist_mgr.py --core <core_id/name> -m lint  -o <output.f>
 
 # 查询当前 workspace 本体 core、显式 workspace 或指定目录 core
 python -B src/rtl_flist_mgr.py --list-core
+python -B src/rtl_flist_mgr.py --list-core --all
 python -B src/rtl_flist_mgr.py --list-core -w <workspace>
 python -B src/rtl_flist_mgr.py --list-core -d <directory>
 python -B src/rtl_flist_mgr.py --list-core --rescan
 python -B src/rtl_flist_mgr.py --help
 ```
 
-生成 flist 时，`-w <workspace>` 默认当前目录。`--list-core` 未传 `-w` 时会从当前目录向上寻找 workspace root：优先最近含 `.rtl_flist/` 的目录，其次最近含 `import/` 的目录；两者均不存在时，以当前目录为 root。每次 `--list-core` 都先打印 `root_dir: <path> (<source>)`，便于确认本次推断结果。默认查询仅列 root 本体 core，排除 `import/`。
+生成 flist 和列出 core 使用同一 root 规则：显式 `-w` 校验目录存在后采用；否则向上查询 `.rtl_flist/workspace.toml`，唯一标记可用，多个祖先标记报歧义。仅有 `.rtl_flist/core_index.toml` 或同目录 `.git` 与 `import/` 并存时只列候选，不自动选中。单独 `.git`、import、空缓存目录及当前目录均不作为兜底。没有明确 root 就报错，不扫描、不生成。
+
+首次显式执行 `python -B src/rtl_flist_mgr.py --init-root -w <root>`，创建内容为 `schema_version = 1` 的 `.rtl_flist/workspace.toml`。普通扫描不会创建标记；`--show-root` 只查询，不扫描也不写缓存，可结合 `-w` 验证指定目录。多个标记时可用 `-w` 消除歧义，不自动删除标记。
+
+`--list-core` 默认仅列 root 本体，排除 `import/`；`--list-core --all` 列出本体与 import 的全部 core。`--all` 仅用于列表且与 `-d` 互斥；`--list-core -d <directory>` 仍仅扫描指定目录。
+
+生成入口仅为 `--core <core_id/name>`，不再接受 corefile 路径位置参数。`--core` 优先精确匹配完整 ID；简写 name 为 ID 第三段，不是 TOML 文件名。兼容四段 ID，多个版本或不同库中 name 相同会列出候选 ID/路径并报错，要求指定完整 ID，不按扫描顺序任选。新增 core 后使用 `--rescan` 更新索引。
+
+输出 `-o` 仍相对当前目录，`-w` 不改变输出位置。上面的 `src/rtl_flist_mgr.py` 写法假设在工具目录执行；在项目任意目录运行时，请使用 `python -B <工具绝对路径>/src/rtl_flist_mgr.py ...`；脚本位置与 workspace root 相互独立。旧命令中的 `soc.toml` 应替换为 `--core dmg:soc:top`，TOML 与 `.core` 的扫描和解析支持不变。
 
 ## 常用信息
 
 workspace 命令会在 root 下维护 `.rtl_flist/`。这是工具生成的本地状态目录，应加入 `.gitignore`，不需要人工编辑或提交。
 
-| file                            | purpose                                                                                                         |
-| ------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `.rtl_flist/core_index.toml`    | core 索引缓存，记录 `core_id`、corefile 路径、Git root 与格式；首次扫描或 `--rescan` 时更新。                  |
-| `.rtl_flist/core_tree.txt`      | 最近一次生成 flist 的已展开 core 依赖树，便于人工核对实际依赖关系；每次成功生成 `.f` 时覆盖。                  |
+| file                         | purpose                                                                                       |
+| ---------------------------- | --------------------------------------------------------------------------------------------- |
+| `.rtl_flist/workspace.toml`  | 显式初始化创建的 root 标记；唯一祖先命中时自动采用。                                          |
+| `.rtl_flist/core_index.toml` | core 索引缓存，记录 `core_id`、corefile 路径、Git root 与格式；首次扫描或 `--rescan` 时更新。 |
+| `.rtl_flist/core_tree.txt`   | 最近一次生成 flist 的已展开 core 依赖树，便于人工核对实际依赖关系；每次成功生成 `.f` 时覆盖。 |
 
 workspace 命令首次执行时扫描 root 与 `import/*/`，将 `core_id`、corefile 路径、Git root 和格式写入 `.rtl_flist/core_index.toml`。之后 `--list-core` 直接读取该索引，不再递归扫描 workspace；生成 `.f` 也按索引定位并解析已登记 corefile。输出中的 `core_index: ... (scan|cache|rescan)` 说明本次来源。
 
@@ -72,17 +92,17 @@ depend = ["dmg:cpu:lsu_harden"]
 | `[core]`           | `id` 是稳定 core 标识；`filesets` 是唯一的 fileset 展开顺序来源。省略时按声明顺序展开全部 fileset。 |
 | `[fileset.<name>]` | 一个有序文件集合，只可放 `depend`、`files`、`dir`、`legacy_f`。                                     |
 | `depend`           | 有序 core ID 数组。当前 fileset 先递归展开其 `depend`，再输出自己的 `files`。                       |
-| `files`            | 有序文件数组；文件相对 `dir`，未填 `dir` 时相对 TOML 所在目录。                                     |
-| `dir`              | 相对所属 Git root，适合将多个 core TOML 集中到 `filelist/` 而 RTL 保持原目录。                      |
+| `files`            | 相对 dir，dir 不填时相对 TOML 所在目录；解析为绝对路径并检查文件存在。                              |
+| `dir`              | 仅允许相对 TOML 所在目录的路径；不填与 . 等价，可写 ../rtl，不允许绝对路径。                        |
 
 ## 去重与同名告警
 
 - core 按 `core_id` 去重，同一个 core 只递归展开一次。
 - 文件按解析后的真实绝对路径去重，同一文件只在首次出现的位置输出。
-- `+incdir+`、`+define+`、`-v` 按 directive 与内容去重。
+- legacy_f 普通 RTL 路径与 TOML files 共同按真实绝对路径去重；-v、+incdir+ 按选项与绝对路径去重，+define+ 按定义内容去重。首次出现的顺序保留。
 - 不同路径但 basename 相同的文件不会去重，都会输出；工具在 `stderr` 给出一次 `W_FILE_NAME_CONFLICT` 告警，列出两条冲突路径。
 
-依赖环、重复 `core_id`、缺失文件和路径逃出 Git root 都会报错。
+core 依赖环、重复 core_id、TOML files 缺失会报错。允许 ../ 和外部绝对路径，不再按 Git root 限制文件访问；仅处理可信 corefile，不执行 RTL。
 
 ## Flist 最前段
 
@@ -116,7 +136,7 @@ files = ["rtl/soc_prelude.sv"]
 
 ## 集中管理 Core TOML
 
-TOML 可放在仓库任意位置。推荐在复杂子系统中集中到 `<repo>/filelist/`，让 RTL、模型和 wrapper 保持原目录，使用 fileset 的 `dir` 指向 Git root 下的实际位置：
+TOML 可放在仓库任意位置。可集中到 `<repo>/filelist/`，通过 `dir = ".."` 指向上一级，或 `dir = "../alu"` 指向同级 RTL 子目录。路径只取决于 TOML 所在目录，不取决于 Git、import 布局或执行命令的位置。
 
 ```text
 cpu/
@@ -136,23 +156,25 @@ cpu/
 
 ## Legacy `.f` 与路径
 
-`legacy_f` 可在 TOML fileset 中封装旧 `.f`，支持普通文件、`-f` / `-F`、单文件 `-v <file.v>`、`+incdir+`、`+define+`。`-v` 会校验文件存在，并在输出 `.f` 中保留为 `-v <path>`。legacy 路径既可直接写绝对路径，也可使用 `$VAR` / `${VAR}` 并通过 `--var NAME=VALUE` 显式传入。对于 DW、SRAM、PDK 等不适合整理为 core 的历史文件，推荐在 legacy `.f` 中直接维护绝对路径，避免每位使用者重复传入路径变量；变量路径仅用于确有环境差异的旧工程。新 TOML 不支持 `when`、`include_dirs`、`defines`、`file_type`；条件应写在 `core.filesets`、`files` 或 `depend` 的条目中，需要 `+incdir+` 或 `+define+` 的历史工程应回到 legacy `.f`。`-y`、`+libext+`、`-work`、`-L` 等未支持的 legacy 选项会报错。常见 FuseSoC CAPI2 `.core`、fileset `depend` 与 `targets.default` 也保持兼容。
+`legacy_f` 指定的 .f 文件相对 TOML 的 dir 定位（dir 不填时相对 TOML）。恢复传统解析：去除注释和空行，递归展开 -f/-F，替换 `$VAR` / `${VAR}`，检查 RTL 和 -v 文件存在，按路径去重，输出规范化绝对路径。legacy_f 仅替换 CLI `--var NAME=VALUE` 提供的变量；未传入的 `$VAR` / `${VAR}` 原样保留，即使同名环境变量存在也不自动展开。含未展开变量的行暂不检查文件存在、不规范化，按替换后的整行文本去重；若是 -f/-F 引用则保留引用，交给后续工具展开。变量全部已知时仍递归展开、按真实路径去重并检查缺失文件和循环引用。沿用原工具规则：-f/-F 的引用及子 .f 内相对路径都以各自所在 .f 目录为基准，不模拟不同仿真器的 cwd 差异。支持 +incdir+、+define+、单文件 -v；-y、+libext+、-work、-L 仍报不支持。建议 DW/SRAM 模型使用真实绝对路径。
 
-默认 `--path-style absolute`，适合后端、DW/SRAM 等绝对模型目录；也可选择 `relative` 或 `rootvar`。
+TOML、兼容 .core 和变量已全部展开的 legacy_f 文件路径输出规范化绝对路径；legacy_f 允许保留 CLI 未指定的变量占位符及所在行的路径写法。删除 `--path-style`，不再支持 relative/rootvar。新 TOML 不支持 when、include_dirs、defines、file_type，相关传统选项可放进 legacy_f。
 
 ## 完整参数
 
-| parameter          | description                                                                                                                               |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `core_file`        | 顶层 core TOML 或 `.core`；生成 flist 时必填。                                                                                            |
-| `-o <output.f>`    | 生成的 filelist；生成 flist 时必填。                                                                                                      |
-| `-m <mode>`        | 输出模式：`sim`、`synth`、`lint`、`emu` 或 `fpga`；默认 `sim`。                                                                           |
-| `-w <workspace>`   | workspace 根目录；`import/*/` 自动视为独立 checkout root。生成 flist 时默认当前目录。                                                     |
-| `--path-style`     | `absolute`、`relative` 或 `rootvar`，默认 `absolute`。                                                                                    |
-| `--var NAME=VALUE` | `legacy_f` 外部路径变量，可重复指定。                                                                                                     |
-| `--rescan`         | 强制扫描 workspace root 与 `import/*/`，覆盖 `.rtl_flist/core_index.toml`。                                                               |
-| `--list-core`      | 列出 workspace 本体 core，排除 `import/`；未传 `-w` 时优先通过 `.rtl_flist/`、其次 `import/` 向上推断 workspace root，并打印 `root_dir`。 |
-| `-d <directory>`   | 与 `--list-core` 配合，递归列出指定目录下的 core；不解析 depend，也不需要 workspace，并打印该目录为 `root_dir`。                          |
+| parameter               | description                                                                                                      |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `--core <core_id/name>` | 生成必填；完整 ID 或唯一第三段 name，不接受 corefile 路径。                                                      |
+| `-o <output.f>`         | 生成的 filelist；生成 flist 时必填。                                                                             |
+| `-m <mode>`             | 输出模式：`sim`、`synth`、`lint`、`emu` 或 `fpga`；默认 `sim`。                                                  |
+| `-w <workspace>`        | 显式 root；否则只自动采用唯一祖先 workspace.toml 标记。                                                          |
+| `--show-root`           | 只查询 root 及依据，不扫描、不写文件。                                                                           |
+| `--init-root -w <root>` | 显式初始化 workspace 标记，目录须已存在，不扫描 core。                                                           |
+| `--var NAME=VALUE`      | `legacy_f` 外部路径变量，可重复指定。                                                                            |
+| `--rescan`              | 强制扫描 workspace root 与 `import/*/`，覆盖 `.rtl_flist/core_index.toml`。                                      |
+| `--list-core`           | 默认仅列本地 core，排除 import；打印 root_dir 和索引来源。                                                       |
+| `--all`                 | 配合 --list-core 列出本地和 import 全部 core，与 -d 互斥。                                                       |
+| `-d <directory>`        | 与 `--list-core` 配合，递归列出指定目录下的 core；不解析 depend，也不需要 workspace，并打印该目录为 `root_dir`。 |
 
 ## 固定示例与回归
 

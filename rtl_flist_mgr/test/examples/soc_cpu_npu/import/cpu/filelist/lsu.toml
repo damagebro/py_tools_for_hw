@@ -3,7 +3,7 @@ id = "dmg:cpu:lsu_harden"
 filesets = ["rtl", "sram_sim_model", "dw_sim_model"]
 
 [fileset.rtl]
-dir = "lsu"
+dir = "../lsu"
 files = ["lsu_harden_top.sv"]
 
 [fileset.sram_sim_model]

@@ -7,11 +7,11 @@ filesets = [
 ]
 
 [fileset.rtl]
-dir = "."
+dir = ".."
 files = ["cpu_subsys.sv"]
 
 [fileset.alu]
-dir = "."
+dir = ".."
 files = [
   "is_synth ? (alu_harden_stub.sv)",
 ]

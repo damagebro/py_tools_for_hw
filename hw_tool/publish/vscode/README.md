@@ -4,8 +4,6 @@
 
 ## 当前功能与命令
 
-Markdown 预览和导出固定生成 TOC，并为未编号标题自动补充层级编号，不再询问。已有编号保留；唯一且位于首个标题位置的未编号一级标题作为文档名，不补编号。正文与目录编号一致，Markdown 源文件和原有标题锚点不变，代码块不参与编号。其他工具的文档查看命令保持原有目录行为。
-
 按 `Ctrl+Shift+P` 打开命令面板，输入 `HW Tool:` 可查看全部命令。编辑器右键菜单提供 Markdown/CSR 命令及 RTL instance 插入或复制；`.v/.sv` 的编辑器和 Explorer 右键菜单均可调用对应 RTL 工具。
 
 | 工具/功能组        | VS Code 命令或入口                                 | 使用条件                           | 说明                                                                                                       |
@@ -31,7 +29,8 @@ Markdown 预览和导出固定生成 TOC，并为未编号标题自动补充层�
 |                    | `HW Tool: Generate CSR (Nested)`                   | 当前文件为 CSR `.md/.xlsx`         | 以 `--nested` 模式生成多层 CSR，固定输出到输入文件同目录的 `out/`；完成后可直接打开 `_tree.html`。         |
 |                    | `HW Tool: Open CSR Tree HTML`                      | 当前文件为 CSR `.md/.xlsx`         | 在当前输入对应的 `out/doc/` 中查找 `_tree.html`；存在多个文件时先选择，再使用 Webview 打开。               |
 |                    | `HW Tool: Insert CSR Register Row...`              | 当前文件为 CSR Markdown            | 只选择一次 `reg_type`，随后在当前行后插入对应的 `reg_define` 默认行，由用户直接修改表格内容。              |
-| **rtl_flist_mgr**  | `HW Tool: Generate RTL Filelist...`                | 当前或 Explorer 选中 `.toml/.core` | 选择 `sim/synth/lint/emu/fpga`，刷新 core 索引并生成到 core 旁的 `out/flist/`。                            |
+| **rtl_flist_mgr**  | `HW Tool: Set RTL Workspace Root...`               | 命令面板或 RTL Cores 文件夹按钮    | 选择目录、初始化标记并保存 workspace 设置，自动刷新 core 列表。                                            |
+|                    | `HW Tool: Generate RTL Filelist...`                | 当前或 Explorer 选中 `.toml/.core` | 选择 `sim/synth/lint/emu/fpga`，刷新 core 索引并生成到 core 旁的 `out/flist/`。                            |
 |                    | `HW Tool: Refresh RTL Core List`                   | 已打开文件、Terminal 或 workspace  | 扫描推断出的 workspace，在 Explorer 的 `RTL Cores` 视图列出本体 core；单击条目打开 corefile。              |
 | **git_repo_mgr**   | `HW Tool: Git Repository Status`                   | 当前 Git workspace                 | 在 HW Tool Output 中汇总 top 与 import checkout 的 commit、dirty、missing 状态。                           |
 |                    | `HW Tool: Sync Git Repositories...`                | 当前 Git workspace                 | 选择 full/shallow clone 并二次确认后递归同步；已有 checkout 不重复维护。                                   |

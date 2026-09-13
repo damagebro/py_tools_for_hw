@@ -1,5 +1,9 @@
 # soc_cpu_npu
 
+本例的 dir 统一相对 TOML 所在目录：CPU filelist 中用 `..`、`../alu`、`../lsu` 指向 RTL。生成命令可显式使用 `-w .`；如需在子目录调用，先在本例根目录运行 `python -B ../../../src/rtl_flist_mgr.py --init-root -w .`，再用 `--show-root` 检查。缓存不是 root 标记。
+
+TOML files 和 SRAM legacy_f 均输出规范化绝对路径。legacy_f 会替换变量、展开 -f/-F、去除注释与空行，并按真实路径去重；相对路径以所在 .f 目录为基准。
+
 这是 `rtl_flist_mgr` 的固定回归与人工阅读示例，结构为 `soc -> cpu/npu`，CPU 进一步依赖 ALU/LSU harden core。
 
 ![soc_cpu_npu architecture](assets/soc_cpu_npu_arch.png)
@@ -27,11 +31,11 @@ soc_cpu_npu/
 
 ## 三种模式
 
-| mode    | CPU ALU                              | CPU LSU                          | LSU SRAM/DW model |
-| ------- | ------------------------------------ | -------------------------------- | ----------------- |
-| `sim`   | 展开 `dmg:cpu:alu_harden`            | 展开 `dmg:cpu:lsu_harden`        | 输出              |
-| `synth` | 输出用户维护的 `alu_harden_stub.sv` | 不展开                           | 不输出            |
-| `lint`  | 展开 `dmg:cpu:alu_harden`            | 展开 `dmg:cpu:lsu_harden`        | 不输出            |
+| mode    | CPU ALU                             | CPU LSU                   | LSU SRAM/DW model |
+| ------- | ----------------------------------- | ------------------------- | ----------------- |
+| `sim`   | 展开 `dmg:cpu:alu_harden`           | 展开 `dmg:cpu:lsu_harden` | 输出              |
+| `synth` | 输出用户维护的 `alu_harden_stub.sv` | 不展开                    | 不输出            |
+| `lint`  | 展开 `dmg:cpu:alu_harden`           | 展开 `dmg:cpu:lsu_harden` | 不输出            |
 
 `alu_harden_stub.sv` 只定义一个 module，但 module 名仍是 `alu_harden_top`，以替代原始 `alu_harden_top.sv` 并满足综合链接。
 
@@ -40,7 +44,7 @@ soc_cpu_npu/
 工具直接按 workspace 与 `import/*/` 扫描。可在本目录执行：
 
 ```bash
-python -B ../../../src/rtl_flist_mgr.py soc.toml -m sim   --var SRAM_PATH=<模型目录绝对路径> -o out/soc_sim.f
-python -B ../../../src/rtl_flist_mgr.py soc.toml -m synth -o out/soc_synth.f
-python -B ../../../src/rtl_flist_mgr.py soc.toml -m lint  -o out/soc_lint.f
+python -B ../../../src/rtl_flist_mgr.py --core dmg:soc:top -w . -m sim   --var SRAM_PATH=<模型目录绝对路径> -o out/soc_sim.f
+python -B ../../../src/rtl_flist_mgr.py --core dmg:soc:top -w . -m synth -o out/soc_synth.f
+python -B ../../../src/rtl_flist_mgr.py --core dmg:soc:top -w . -m lint  -o out/soc_lint.f
 ```

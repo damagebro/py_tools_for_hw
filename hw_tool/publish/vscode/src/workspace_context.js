@@ -64,15 +64,25 @@ async function contextDirectory(resource) {
 
 
 async function findRtlFlistWorkspace(start) {
+    const markers = [];
+    const candidates = [];
     for (const candidate of ancestorDirectories(start)) {
-        if (await pathExists(path.join(candidate, ".rtl_flist"))) {
-            return candidate;
+        if (await pathExists(path.join(candidate, ".rtl_flist", "workspace.toml"))) {
+            markers.push(candidate);
         }
-        if (await pathExists(path.join(candidate, "import"))) {
-            return candidate;
+        if (await pathExists(path.join(candidate, ".rtl_flist", "core_index.toml")) ||
+            (await pathExists(path.join(candidate, ".git")) && await pathExists(path.join(candidate, "import")))) {
+            candidates.push(candidate);
         }
     }
-    return path.resolve(start);
+    if (markers.length === 1) {
+        return markers[0];
+    }
+    const error = new Error(markers.length > 1
+        ? `Multiple RTL workspace markers: ${markers.join(", ")}. Use CLI with -w.`
+        : `No RTL workspace marker. Run hw_tool rtl_flist_mgr --init-root -w <root>. Candidates: ${candidates.join(", ") || "none"}`);
+    error.roots = markers;
+    throw error;
 }
 
 
