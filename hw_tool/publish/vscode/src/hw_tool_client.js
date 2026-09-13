@@ -28,8 +28,8 @@ function runProcess(command, args, cwd, output, processName, options = {}) {
         });
         child.on("error", reject);
         child.on("close", (code) => {
-            if (code === 0) {
-                resolve({ stdout, stderr });
+            if ((options.acceptedExitCodes || [0]).includes(code)) {
+                resolve({ stdout, stderr, code });
             }
             else {
                 reject(new Error(`${processName || path.basename(command)} exited with code ${code}`));
@@ -89,18 +89,19 @@ async function runHwTool(context, toolArgs, options) {
         processName,
         resource,
         requiredPackages = [],
-        echoStdout = true
+        echoStdout = true,
+        acceptedExitCodes = [0]
     } = options;
     const pythonPath = configuredPython(resource);
     const hwToolPath = await runtimeHwToolPath(context);
     await checkPythonRuntime(pythonPath, cwd, output, requiredPackages);
     return runProcess(
         pythonPath,
-        ["-B", hwToolPath, "de", ...toolArgs],
+        ["-X", "utf8", "-B", hwToolPath, "de", ...toolArgs],
         cwd,
         output,
         processName,
-        { echoStdout }
+        { echoStdout, acceptedExitCodes }
     );
 }
 

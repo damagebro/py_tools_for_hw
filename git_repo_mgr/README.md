@@ -1,16 +1,16 @@
 # git_repo_mgr
 
-`git_repo_mgr` 管理多 Git 仓库的递归依赖与集成版本。每个 node 仅声明直接依赖，工具递归发现完整依赖图；真实 checkout 去重后平铺在 top 的 `import/`，逻辑 tree/DAG 保存在状态文件中。
+`git_repo_mgr` 管理多 Git 仓库的递归依赖与集成版本。每个 node 仅声明直接依赖，工具递归发现完整依赖图；真实 checkout 去重后平铺在 workspace_root 的 `import/`，逻辑 tree/DAG 保存在状态文件中。
 
 ## 设计初衷
 
 `git_repo_mgr` 借鉴 Google `repo` 的 workspace 操作方式，以及 FuseSoC core dependency 的分布式 tree 思路：开发者维护相邻 node 的依赖，集成者获得 flat checkout、统一状态和可复现版本快照。
 
-| tool                | 优点                                                         | 集成时的限制                                                       |
-| ------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------ |
-| Google `repo`       | flat workspace，批量拉取仓库、切分支、打 tag 方便            | 集中 manifest 需要维护完整仓库集合；权限隔离和 manifest 编写成本较高 |
-| FuseSoC core 依赖   | tree 结构，node 只声明相邻依赖，局部开发和复用较自然          | 跨 node 统一版本、处理版本冲突、批量切分支/打 tag、冻结交付版本较繁琐 |
-| `git_repo_mgr`     | 分布式直接依赖声明，递归生成 tree；去重后的 checkout flat 管理 | 首版聚焦 Git workspace 管理，RTL core/fileset 仍由后续 `rtl_filelist` 处理 |
+| tool              | 优点                                                           | 集成时的限制                                                               |
+| ----------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Google `repo`     | flat workspace，批量拉取仓库、切分支、打 tag 方便              | 集中 manifest 需要维护完整仓库集合；权限隔离和 manifest 编写成本较高       |
+| FuseSoC core 依赖 | tree 结构，node 只声明相邻依赖，局部开发和复用较自然           | 跨 node 统一版本、处理版本冲突、批量切分支/打 tag、冻结交付版本较繁琐      |
+| `git_repo_mgr`    | 分布式直接依赖声明，递归生成 tree；去重后的 checkout flat 管理 | 首版聚焦 Git workspace 管理，RTL core/fileset 仍由后续 `rtl_filelist` 处理 |
 
 ## 命令速览
 
@@ -20,19 +20,19 @@
 python -B /abs/path/to/git_repo_mgr/src/git_repo_mgr.py
 ```
 
-在 top Git 仓库内使用：
+在工作区根目录（`workspace_root`）内使用，既可以是 Git 仓库根目录，也可以是普通本地目录：
 
-| command                                               | 用途                                           |
-| ----------------------------------------------------- | ---------------------------------------------- |
-| `<git_repo_mgr> sync [--shallow]`                    | 递归同步 `git_deps.toml`                       |
-| `<git_repo_mgr> sync --flat git_deps_flat.toml`      | 按固定 commit 快照恢复 workspace               |
-| `<git_repo_mgr> status`                              | 汇总 top 与 import checkout 状态               |
-| `<git_repo_mgr> graph --format tree\|json`           | 查看保存的依赖 tree 或机器可读图                |
-| `<git_repo_mgr> export-flat -o git_deps_flat.toml`   | 导出可复现的 flat 快照                         |
-| `<git_repo_mgr> switch <branch\|tag\|commit>`       | 统一切换全部 checkout                          |
-| `<git_repo_mgr> tag <name> [-m <message>] [--push]`  | 在全部 checkout 创建并可选推送 annotated tag   |
-| `<git_repo_mgr> forall -c "<shell command>"`        | 在全部 checkout 中执行 shell 命令               |
-| `<git_repo_mgr> admin <command>`                     | 查询或修改远端 main 分支保护与发版状态          |
+| command                                             | 用途                                          |
+| --------------------------------------------------- | --------------------------------------------- |
+| `<git_repo_mgr> sync [--shallow]`                   | 递归同步 `git_deps.toml`                      |
+| `<git_repo_mgr> sync --flat git_deps_flat.toml`     | 按固定 commit 快照恢复 workspace              |
+| `<git_repo_mgr> status`                             | 显示分支、提交、状态汇总及 dirty/missing 明细 |
+| `<git_repo_mgr> graph --format tree or json`        | 查看保存的依赖 tree 或机器可读图              |
+| `<git_repo_mgr> export-flat -o git_deps_flat.toml`  | 导出可复现的 flat 快照                        |
+| `<git_repo_mgr> switch <branch or tag or commit>`   | 统一切换全部 checkout                         |
+| `<git_repo_mgr> tag <name> [-m <message>] [--push]` | 在全部 checkout 创建并可选推送 annotated tag  |
+| `<git_repo_mgr> forall -c "<shell command>"`        | 在全部 checkout 中执行 shell 命令             |
+| `<git_repo_mgr> admin <command>`                    | 查询或修改远端 main 分支保护与发版状态        |
 
 常用示例：
 
@@ -49,7 +49,21 @@ python -B /abs/path/to/git_repo_mgr/src/git_repo_mgr.py
 
 ## 依赖声明
 
+在 `git_repo_mgr/` 工具目录直接运行 Python，生成模板，不依赖 Git 仓库或网络：
+
+```bash
+# 在当前目录生成；已有同名文件时拒绝覆盖
+python -B src/git_repo_mgr.py template
+
+# 在目标项目生成
+python -B src/git_repo_mgr.py template -o /project/workspace_root/git_deps.toml
+```
+
+模板包含注释形式的 remote/dependency 示例，修改地址并取消注释后生效；未修改时是合法的无依赖清单。`-o` 允许将模板另存为任意文件名，但 `sync` 仍固定读取各仓库根目录的 `git_deps.toml`，并不支持自定义递归清单名称。统一名称使上层只需知道仓库地址和 ref，无需再配置每个子仓库的清单路径；`git_deps_flat.toml` 是另一个独立的版本快照入口，由 `sync --flat <file>` 显式指定。
+
 每个 node 仓库根目录只维护自己的直接依赖：
+
+顶层必须存在 `git_deps.toml`。递归进入子仓库后，没有该文件或文件中没有 dependency 条目（包含空清单、`dependency = []`）时视为 leaf，停止向下递归；该仓库仍保留 checkout 并记录到状态与依赖树，不会生成空清单或修改子仓库。文件存在但 TOML/依赖格式错误、无权限读取、拉取失败或循环依赖仍报错，不作为 leaf 跳过。
 
 ```toml
 [remote.company]
@@ -81,23 +95,37 @@ http://git.example.com/dmg/common_ip/
 
 ## Workspace 与冲突
 
-真实 checkout 仅位于 `top/import/`：
+### 定位 workspace
 
-```text
-top/
-├── import/
-│   ├── common_ip/
-│   ├── cpu/
-│   ├── alu/
-│   ├── lsu/
-│   ├── npu/
-│   └── dma/
-└── .git_repo/
+- 指定 `--workspace <directory>`（简写 `-w`）：直接使用该目录，要求已存在，不改用父 Git 仓库。
+- 省略 `--workspace`：从当前目录向上查找 `.git_repo/resolved.toml`；没有状态文件时，再查找 `git_deps.toml`。每一级规则都要求唯一命中，多处命中或全部未命中时报错，需显式指定 `--workspace`。
+- 状态文件优先于子仓库清单，因此同步后可在 `workspace_root/import/cpu/rtl/` 等子目录执行命令。
+
+`show-root` 显示定位目录和依据；`sync` 开始时也显示 root。常规同步要求 root 下存在 `git_deps.toml`；`template` 不查找 workspace，默认在当前目录创建模板。
+
+```bash
+# 在项目任意子目录执行，替换下面的工具脚本路径
+python -B /path/to/git_repo_mgr/src/git_repo_mgr.py show-root
+python -B /path/to/git_repo_mgr/src/git_repo_mgr.py sync
+
+# 显式指定 workspace，也可指定普通目录
+python -B /path/to/git_repo_mgr/src/git_repo_mgr.py sync --workspace /project/workspace_root
+python -B /path/to/git_repo_mgr/src/git_repo_mgr.py status -w /project/workspace_root
 ```
 
-同一归一化后的 repository 只 checkout 一次；后续依赖关系在 tree 中标记为 `[shared]`。同一 repository 请求不同 `ref`、或递归依赖成环时，同步直接失败并显示完整依赖路径。
+### Workspace 根目录与 import
 
-默认 checkout 名称为仓库 basename，例如 `common_ip.git` 对应 `import/common_ip/`。不同 URL 出现相同 basename 时，由集成者在 top 的 `git_deps.toml` 显式命名：
+所有依赖仓库统一放到 `workspace_root/import/<checkout_name>/`，管理状态保存在 `workspace_root/.git_repo/`。
+
+- **workspace_root 是 Git 仓库**：workspace_root 与 import 仓库一起参与 Git 操作；workspace_root 需要 origin 和有效提交。
+- **workspace_root 是普通目录**：无需 `git init`，支持 sync、status、graph、export-flat、switch、tag、forall；Git 操作仅作用于 import，不操作 workspace_root 或其父 Git 仓库。
+- workspace_root 的 Git 身份发生变化后，先重新 sync。普通 workspace_root 的 flat 快照只固定依赖版本，本地配置需自行保存；admin 发布/保护命令仍要求 Git workspace。
+
+### 去重与冲突
+
+- **同一仓库**：按归一化 URL 去重，只保留一份 checkout，重复依赖在 tree 中标记为 `[shared]`。
+- **版本冲突或循环依赖**：同步失败，并显示冲突/循环的依赖路径，不自动选择版本。
+- **目录重名**：默认使用仓库 basename；不同仓库同名时，在 workspace_root 的 `git_deps.toml` 显式指定 checkout 名称：
 
 ```toml
 [[checkout]]
@@ -105,7 +133,7 @@ repository = "https://github.com/vendor/common_ip.git"
 name = "vendor_common_ip"
 ```
 
-`[[checkout]]` 只影响当前 top workspace；递归子仓库中的同类配置不会覆盖它。
+该仓库将落到 `workspace_root/import/vendor_common_ip/`。命名配置以当前 workspace_root 为准，子仓库中的同类配置不会覆盖它。
 
 ## 状态与版本快照
 
@@ -120,7 +148,7 @@ name = "vendor_common_ip"
 示例 `tree.txt`：
 
 ```text
-top
+workspace_root
 ├── common_ip
 ├── cpu
 │   ├── common_ip [shared]
@@ -131,28 +159,28 @@ top
     └── dma
 ```
 
-导出 `git_deps_flat.toml` 后，另一个集成者先取得 top checkout，再执行 `sync --flat`。flat 恢复不递归读取子仓库 manifest，全部仓库以 detached HEAD 固定在快照记录的 commit。
+导出 `git_deps_flat.toml` 后，另一个集成者先取得 workspace_root checkout，再执行 `sync --flat`。flat 恢复不递归读取子仓库 manifest，全部仓库以 detached HEAD 固定在快照记录的 commit。
 
 ## `forall`
 
-`forall` 对齐 Google `repo forall -c`：按 resolved workspace 顺序在 top 与全部 import checkout 中执行 shell 命令。可在命令末尾给出 checkout 名称筛选范围，`--dry-run` 仅预览，`--fail-fast` 在首次失败后停止。
+`forall` 对齐 Google `repo forall -c`：按 resolved workspace 顺序在 workspace_root 与全部 import checkout 中执行 shell 命令。可在命令末尾给出 checkout 名称筛选范围，`--dry-run` 仅预览，`--fail-fast` 在首次失败后停止。
 
-| environment_variable | description                      |
-| -------------------- | -------------------------------- |
-| `GIT_REPO_MGR_TOP`  | 当前 top workspace 的绝对路径    |
-| `GIT_REPO_MGR_NAME` | 当前 checkout 名称               |
-| `GIT_REPO_MGR_PATH` | 当前 checkout 相对 top 的路径    |
-| `REPO_PROJECT`      | 当前项目名称                     |
-| `REPO_PATH`         | 当前 checkout 相对 top 的路径    |
-| `REPO_REMOTE`       | 当前仓库的 repository URL        |
-| `REPO_LREV`         | 当前 checkout 的实际 HEAD commit |
-| `REPO_RREV`         | resolved 状态中记录的 ref        |
+| environment_variable | description                              |
+| -------------------- | ---------------------------------------- |
+| `GIT_REPO_MGR_TOP`   | 工作区根目录的绝对路径（保留原变量名）   |
+| `GIT_REPO_MGR_NAME`  | 当前 checkout 名称                       |
+| `GIT_REPO_MGR_PATH`  | 当前 checkout 相对 workspace_root 的路径 |
+| `REPO_PROJECT`       | 当前项目名称                             |
+| `REPO_PATH`          | 当前 checkout 相对 workspace_root 的路径 |
+| `REPO_REMOTE`        | 当前仓库的 repository URL                |
+| `REPO_LREV`          | 当前 checkout 的实际 HEAD commit         |
+| `REPO_RREV`          | resolved 状态中记录的 ref                |
 
 ## 管理员策略与发版
 
 `policy.branch` 是发版使用的默认受保护分支，默认为 `main`；发版只允许从该分支的 `origin/<branch>` 当前提交创建统一 tag。完成全仓统一切换后，管理员也可显式保护或解除任意分支。高权限命令通过 GitHub/GitLab 服务端 API 生效，token 不写入仓库文件。
 
-top 根目录创建 `git_repo_admin.toml`：
+workspace_root 根目录创建 `git_repo_admin.toml`：
 
 ```toml
 [policy]
@@ -181,18 +209,18 @@ gitlab_allowed_to_unprotect = [{ access_level = 40 }]
 
 `integration-only` 只允许配置中的 release 用户、团队或 app 修改 `main`；GitLab 必须显式给出 `gitlab_allowed_to_push`。`read-only` 则禁止全部直接 push/merge，适合短时冻结。无 token 或 API 权限不足时，管理员命令直接失败。
 
-| command                                                 | 用途                                                                  |
-| ------------------------------------------------------- | --------------------------------------------------------------------- |
-| `admin policy-status`                                   | 显示各仓库默认分支的 provider、当前 token 身份与保护状态              |
-| `admin policy-diff`                                     | 比较默认分支实际策略与 `baseline_mode`，发现人工策略漂移              |
-| `admin policy-apply [--dry-run]`                        | 对默认分支应用日常 baseline 策略                                     |
-| `admin protect <branch> [--mode read-only\|integration-only]` | 先确认全部 `origin/<branch>` 存在，再批量建立指定分支保护       |
-| `admin unprotect <branch>`                              | 先确认全部 `origin/<branch>` 存在，再批量删除指定分支保护             |
-| `admin lock-main [--mode read-only\|integration-only]` | 保存原始策略后，批量临时锁定默认分支                                 |
-| `admin unlock-main <lock_id>`                           | 按保存的原始 API 策略精确恢复                                         |
-| `admin release <tag> [--push]`                          | 校验 clean、受保护默认分支、`HEAD == origin/<branch>`，保存快照并打 tag |
-| `admin release-resume <tag>`                            | 按 release 状态继续未完成 tag/push；默认分支或 commit 变化时停止      |
-| `admin audit`                                           | 输出本地管理员操作审计记录                                             |
+| command                                    | 用途                                                                    |
+| ------------------------------------------ | ----------------------------------------------------------------------- |
+| `admin policy-status`                      | 显示各仓库默认分支的 provider、当前 token 身份与保护状态                |
+| `admin policy-diff`                        | 比较默认分支实际策略与 `baseline_mode`，发现人工策略漂移                |
+| `admin policy-apply [--dry-run]`           | 对默认分支应用日常 baseline 策略                                        |
+| `admin protect <branch> [--mode read-only\ | integration-only]`                                                      | 先确认全部 `origin/<branch>` 存在，再批量建立指定分支保护 |
+| `admin unprotect <branch>`                 | 先确认全部 `origin/<branch>` 存在，再批量删除指定分支保护               |
+| `admin lock-main [--mode read-only\        | integration-only]`                                                      | 保存原始策略后，批量临时锁定默认分支 |
+| `admin unlock-main <lock_id>`              | 按保存的原始 API 策略精确恢复                                           |
+| `admin release <tag> [--push]`             | 校验 clean、受保护默认分支、`HEAD == origin/<branch>`，保存快照并打 tag |
+| `admin release-resume <tag>`               | 按 release 状态继续未完成 tag/push；默认分支或 commit 变化时停止        |
+| `admin audit`                              | 输出本地管理员操作审计记录                                              |
 
 示例：
 

@@ -167,10 +167,12 @@ def validate_checkout_name(name: object) -> str:
     return name
 
 
-def read_toml(path: Path, purpose: str) -> dict[str, Any]:
+def read_toml(path: Path, purpose: str, *, missing_ok: bool = False) -> dict[str, Any]:
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
+        if missing_ok and not path.is_symlink():
+            return {}
         raise RepoMgrError("E_MANIFEST_MISSING", f"{purpose} not found: {path}") from exc
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise RepoMgrError("E_TOML", f"failed to read {purpose}: {path}", (str(exc),)) from exc
@@ -282,6 +284,41 @@ def ensure_git_repository(path: Path) -> Path:
     return Path(result.stdout.strip()).resolve()
 
 
+def workspace_directory(path: Path) -> Path:
+    path = path.resolve()
+    if not path.is_dir():
+        raise RepoMgrError("E_WORKSPACE", f"workspace directory not found: {path}")
+    return path
+
+
+def locate_workspace(workspace_root_arg: str | None, start: Path | None = None) -> tuple[Path, str]:
+    if workspace_root_arg is not None:
+        return workspace_directory(Path(workspace_root_arg)), "--workspace"
+    current = (start or Path.cwd()).resolve()
+    ancestors = (current, *current.parents)
+    for relative, source in ((Path(".git_repo") / RESOLVED_NAME, ".git_repo/resolved.toml"),
+                             (Path(MANIFEST_NAME), MANIFEST_NAME)):
+        matches = [candidate for candidate in ancestors if (candidate / relative).is_file()]
+        if len(matches) > 1:
+            raise RepoMgrError("E_WORKSPACE_AMBIGUOUS", f"multiple {source} ancestors; specify --workspace <directory>",
+                               tuple(f"candidate: {p} ({source})" for p in matches))
+        if matches:
+            return matches[0], source
+    raise RepoMgrError("E_WORKSPACE_NOT_FOUND", f"no workspace found above {current}; specify --workspace <directory>")
+
+
+def is_git_root(path: Path) -> bool:
+    result = run_git(["rev-parse", "--show-toplevel"], path)
+    return result.returncode == 0 and Path(result.stdout.strip()).resolve() == path.resolve()
+
+
+def state_top_is_git(top: Path, workspace: dict[str, Any]) -> bool:
+    expected = workspace.get("top_is_git", bool(workspace.get("top_repository")))
+    if not isinstance(expected, bool) or expected != is_git_root(top):
+        raise RepoMgrError("E_WORKSPACE_KIND", "top Git identity changed; run sync to refresh workspace state")
+    return expected
+
+
 def repository_origin(path: Path) -> str:
     origin = git_output(["config", "--get", "remote.origin.url"], path)
     if not origin:
@@ -294,14 +331,24 @@ def repository_commit(path: Path) -> str:
 
 
 def is_dirty(path: Path, ignored_untracked: tuple[str, ...] = ()) -> bool:
-    lines = git_output(["status", "--porcelain"], path).splitlines()
+    return bool(repository_changes(path, ignored_untracked))
+
+
+def repository_changes(path: Path, ignored_untracked: tuple[str, ...] = ()) -> list[str]:
+    result = run_git(["-c", "core.quotepath=false", "status", "--porcelain"], path)
+    if result.returncode:
+        raise RepoMgrError("E_GIT", result.stderr.strip() or "git status failed")
+    changes = []
+    # Preserve porcelain's leading space (the index/worktree status columns).
+    lines = result.stdout.splitlines()
     for line in lines:
         if not line.startswith("?? "):
-            return True
+            changes.append(line)
+            continue
         name = line[3:].replace("\\", "/")
         if not any(name == prefix.rstrip("/") or name.startswith(prefix) for prefix in ignored_untracked):
-            return True
-    return False
+            changes.append(line)
+    return changes
 
 
 def is_top_dirty(top: Path) -> bool:
@@ -378,7 +425,8 @@ def relative_checkout(top: Path, path: Path) -> str:
 
 class WorkspaceResolver:
     def __init__(self, top: Path, shallow: bool) -> None:
-        self.top = ensure_git_repository(top)
+        self.top = workspace_directory(top)
+        self.top_is_git = is_git_root(self.top)
         self.shallow = shallow
         self.nodes: dict[str, RepositoryNode] = {}
         self.node_order: list[str] = []
@@ -392,14 +440,14 @@ class WorkspaceResolver:
         top_manifest = read_toml(top_manifest_path, MANIFEST_NAME)
         self.overrides = parse_checkout_overrides(top_manifest, top_manifest_path)
 
-        root_repository = repository_origin(self.top)
-        self.root_key = normalize_repository(root_repository)
+        root_repository = repository_origin(self.top) if self.top_is_git else ""
+        self.root_key = normalize_repository(root_repository) if self.top_is_git else f"workspace:{self.top.as_posix()}"
         root_node = RepositoryNode(
             key=self.root_key,
             name=self.top.name,
             repository=root_repository,
-            ref="HEAD",
-            commit=repository_commit(self.top),
+            ref="HEAD" if self.top_is_git else "",
+            commit=repository_commit(self.top) if self.top_is_git else "",
             checkout=".",
             path=self.top,
             root=True,
@@ -470,7 +518,7 @@ class WorkspaceResolver:
             self.node_order.append(key)
             self.checkout_names[checkout] = key
             self.edges.append((parent.key, key))
-            child_manifest = read_toml(path / MANIFEST_NAME, MANIFEST_NAME)
+            child_manifest = read_toml(path / MANIFEST_NAME, MANIFEST_NAME, missing_ok=True)
             self._walk(node, child_manifest, (*stack, key), request_chain)
 
     def _checkout_name(self, key: str, repository: str) -> str:
@@ -543,6 +591,7 @@ class WorkspaceResolver:
                 "top_name": root.name,
                 "top_repository": root.repository,
                 "top_commit": root.commit,
+                "top_is_git": self.top_is_git,
             },
             "repositories": repositories,
         }
@@ -577,6 +626,7 @@ def state_to_toml(state: dict[str, Any]) -> str:
         f"top_name = {toml_string(workspace['top_name'])}",
         f"top_repository = {toml_string(workspace['top_repository'])}",
         f"top_commit = {toml_string(workspace['top_commit'])}",
+        f"top_is_git = {str(workspace.get('top_is_git', bool(workspace['top_repository']))).lower()}",
         "",
     ]
     for repository in state["repositories"]:
@@ -610,7 +660,7 @@ def load_resolved(top: Path) -> dict[str, Any]:
     path = state_dir(top) / RESOLVED_NAME
     data = read_toml(path, RESOLVED_NAME)
     workspace = data.get("workspace")
-    repositories = data.get("repository")
+    repositories = data.get("repository", [])
     if not isinstance(workspace, dict) or not isinstance(repositories, list):
         raise RepoMgrError("E_RESOLVED", f"invalid resolved state: {path}")
     required_workspace = ("top_name", "top_repository", "top_commit")
@@ -626,7 +676,7 @@ def load_resolved(top: Path) -> dict[str, Any]:
 
 
 def state_entries(top: Path, state: dict[str, Any]) -> list[tuple[str, Path]]:
-    entries = [(str(state["workspace"]["top_name"]), top)]
+    entries = [(str(state["workspace"]["top_name"]), top)] if state_top_is_git(top, state["workspace"]) else []
     for item in state["repositories"]:
         checkout = Path(str(item["checkout"]))
         if checkout.is_absolute() or ".." in checkout.parts:
@@ -647,6 +697,8 @@ def state_records(top: Path, state: dict[str, Any]) -> list[dict[str, str | Path
             "path": top,
         }
     ]
+    if not state_top_is_git(top, workspace):
+        records = []
     for item in state["repositories"]:
         records.append(
             {
@@ -661,8 +713,42 @@ def state_records(top: Path, state: dict[str, Any]) -> list[dict[str, str | Path
     return records
 
 
-def command_sync(top_arg: str, shallow: bool) -> int:
-    resolver = WorkspaceResolver(Path(top_arg).resolve(), shallow)
+def command_template(output_arg: str) -> int:
+    output = Path(output_arg).resolve()
+    content = '''# Declare this repository's direct dependencies only.
+# Uncomment and edit the examples before syncing.
+# With no dependencies, this repository is a leaf node.
+
+# [remote.company]
+# url = "https://git.example.com/team"
+
+# [[dependency]]
+# repository = "common_ip.git"
+# ref = "main"
+
+# [[dependency]]
+# repository = "https://git.example.com/other/subsys.git"
+# ref = "v1.0.0"
+
+# ref supports branch, tag, or commit ID.
+# One remote: dependency.remote is optional.
+# Multiple remotes: relative repository entries require remote = "company".
+# Checkout defaults to import/<repository basename>/.
+'''
+    try:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with output.open("x", encoding="utf-8") as stream:
+            stream.write(content)
+    except FileExistsError as exc:
+        raise RepoMgrError("E_OUTPUT_EXISTS", f"refusing to overwrite: {output}") from exc
+    except OSError as exc:
+        raise RepoMgrError("E_OUTPUT", f"failed to write template: {output}", (str(exc),)) from exc
+    print(f"template: {output}")
+    return 0
+
+
+def command_sync(workspace_root_arg: str, shallow: bool) -> int:
+    resolver = WorkspaceResolver(Path(workspace_root_arg).resolve(), shallow)
     resolver.resolve()
     write_workspace_state(resolver.top, resolver)
     print(f"synced {len(resolver.node_order) - 1} imported repository(s)")
@@ -670,8 +756,8 @@ def command_sync(top_arg: str, shallow: bool) -> int:
     return 0
 
 
-def command_export_flat(top_arg: str, output_arg: str) -> int:
-    top = ensure_git_repository(Path(top_arg).resolve())
+def command_export_flat(workspace_root_arg: str, output_arg: str) -> int:
+    top = workspace_directory(Path(workspace_root_arg).resolve())
     state = load_resolved(top)
     output = Path(output_arg)
     if not output.is_absolute():
@@ -682,8 +768,8 @@ def command_export_flat(top_arg: str, output_arg: str) -> int:
     return 0
 
 
-def command_graph(top_arg: str, output_format: str) -> int:
-    top = ensure_git_repository(Path(top_arg).resolve())
+def command_graph(workspace_root_arg: str, output_format: str) -> int:
+    top = workspace_directory(Path(workspace_root_arg).resolve())
     if output_format == "tree":
         path = state_dir(top) / TREE_NAME
         try:
@@ -699,42 +785,77 @@ def command_graph(top_arg: str, output_format: str) -> int:
     return 0
 
 
-def command_status(top_arg: str) -> int:
-    top = ensure_git_repository(Path(top_arg).resolve())
+def command_status(workspace_root_arg: str) -> int:
+    top = workspace_directory(Path(workspace_root_arg).resolve())
     state = load_resolved(top)
     expected_origin = str(state["workspace"]["top_repository"])
-    actual_origin = repository_origin(top)
-    if normalize_repository(actual_origin) != normalize_repository(expected_origin):
+    actual_origin = repository_origin(top) if state_top_is_git(top, state["workspace"]) else ""
+    if actual_origin and normalize_repository(actual_origin) != normalize_repository(expected_origin):
         raise RepoMgrError("E_ORIGIN_CONFLICT", "top repository does not match resolved state")
 
-    failures = 0
-    for name, path in state_entries(top, state):
+    rows = []
+    details = []
+    counts = dict.fromkeys(("CLEAN", "DIRTY", "MISSING", "ERROR"), 0)
+    for record in state_records(top, state):
+        path = record["path"]
+        name = top.name if record["checkout"] == "." else str(record["checkout"]).replace("\\", "/")
+        branch, commit, status = "\u2014", "\u2014", "CLEAN"
+        extra = []
         if not path.is_dir():
-            print(f"[missing] {name}: {path}")
-            failures += 1
-            continue
-        try:
-            commit = repository_commit(path)
-            dirty = is_top_dirty(path) if path == top else is_dirty(path)
-        except RepoMgrError as exc:
-            print(f"[error] {name}: {exc.message}")
-            failures += 1
-            continue
-        suffix = " dirty" if dirty else ""
-        print(f"[ok] {name}: {commit[:12]}{suffix}")
-        if dirty:
-            failures += 1
-    return 1 if failures else 0
+            status = "MISSING"
+            extra = [f"Expected: {record['repository']}", f"Ref: {record['ref']}",
+                     'Run "HW Tool: Sync Git Repositories..." to create it.',
+                     "CLI: git_repo_mgr sync"]
+        else:
+            try:
+                if not is_git_root(path):
+                    raise RepoMgrError("E_GIT", "checkout is not a Git repository root")
+                head = repository_commit(path)
+                commit = head[:7]
+                branch = run_git(["symbolic-ref", "--quiet", "--short", "HEAD"], path).stdout.strip()
+                if not branch:
+                    tag = run_git(["describe", "--tags", "--exact-match", "HEAD"], path).stdout.strip()
+                    branch = tag or (str(record["ref"]) if head == record["commit"] else "detached")
+                extra = repository_changes(path, ("import/", ".git_repo/") if path == top else ())
+                if extra:
+                    status = "DIRTY"
+            except RepoMgrError as exc:
+                status = "ERROR"
+                extra = [exc.message]
+        rows.append((name, branch, commit, status))
+        counts[status] += 1
+        if extra:
+            details.append((status, name, extra))
+
+    headers = ("Repository", "Branch / Ref", "Commit", "Status")
+    widths = [max(len(row[i]) for row in [headers, *rows]) for i in range(4)]
+    def table_row(row: tuple[str, ...]) -> str:
+        return "   ".join(value.ljust(width) for value, width in zip(row, widths)).rstrip()
+
+    print(f"Git Repository Status\nWorkspace: {top.as_posix()}\n")
+    print(table_row(headers))
+    print("\u2500" * (sum(widths) + 9))
+    for row in rows:
+        print(table_row(row))
+    summary = [f"{len(rows)} repositories", *(f"{counts[s]} {s.lower()}" for s in ("CLEAN", "DIRTY", "MISSING"))]
+    if counts["ERROR"]:
+        summary.append(f"{counts['ERROR']} error")
+    print("\nSummary: " + " \u00b7 ".join(summary))
+    for status, name, extra in details:
+        print(f"\n{status:<7} {name}")
+        for line in extra:
+            print(f"        {line}")
+    return 1 if any(counts[s] for s in ("DIRTY", "MISSING", "ERROR")) else 0
 
 
 def command_forall(
-    top_arg: str,
+    workspace_root_arg: str,
     command: str,
     projects: list[str],
     fail_fast: bool,
     dry_run: bool,
 ) -> int:
-    top = ensure_git_repository(Path(top_arg).resolve())
+    top = workspace_directory(Path(workspace_root_arg).resolve())
     state = load_resolved(top)
     records = state_records(top, state)
     record_map = {str(record["name"]): record for record in records}
@@ -809,8 +930,8 @@ def fetch_branch_checkout(path: Path, ref: str) -> str:
     return checkout_commit(path, resolve_ref(path, ref))
 
 
-def command_switch(top_arg: str, ref: str, dry_run: bool) -> int:
-    top = ensure_git_repository(Path(top_arg).resolve())
+def command_switch(workspace_root_arg: str, ref: str, dry_run: bool) -> int:
+    top = workspace_directory(Path(workspace_root_arg).resolve())
     state = load_resolved(top)
     entries = state_entries(top, state)
     for name, path in entries:
@@ -827,8 +948,8 @@ def command_switch(top_arg: str, ref: str, dry_run: bool) -> int:
     return 0
 
 
-def command_tag(top_arg: str, tag: str, message: str | None, push: bool, dry_run: bool) -> int:
-    top = ensure_git_repository(Path(top_arg).resolve())
+def command_tag(workspace_root_arg: str, tag: str, message: str | None, push: bool, dry_run: bool) -> int:
+    top = workspace_directory(Path(workspace_root_arg).resolve())
     state = load_resolved(top)
     entries = state_entries(top, state)
     for name, path in entries:
@@ -852,16 +973,17 @@ def command_tag(top_arg: str, tag: str, message: str | None, push: bool, dry_run
     return 0
 
 
-def command_sync_flat(top_arg: str, flat_arg: str, shallow: bool) -> int:
-    top = ensure_git_repository(Path(top_arg).resolve())
+def command_sync_flat(workspace_root_arg: str, flat_arg: str, shallow: bool) -> int:
+    top = workspace_directory(Path(workspace_root_arg).resolve())
     flat_path = Path(flat_arg).resolve()
     state = read_flat_snapshot(flat_path)
     workspace = state["workspace"]
-    if normalize_repository(repository_origin(top)) != normalize_repository(str(workspace["top_repository"])):
-        raise RepoMgrError("E_ORIGIN_CONFLICT", "top repository does not match flat snapshot")
-    if is_top_dirty(top):
-        raise RepoMgrError("E_DIRTY", f"refusing to update dirty top checkout: {top}")
-    checkout_commit(top, str(workspace["top_commit"]))
+    if state_top_is_git(top, workspace):
+        if normalize_repository(repository_origin(top)) != normalize_repository(str(workspace["top_repository"])):
+            raise RepoMgrError("E_ORIGIN_CONFLICT", "top repository does not match flat snapshot")
+        if is_top_dirty(top):
+            raise RepoMgrError("E_DIRTY", f"refusing to update dirty top checkout: {top}")
+        checkout_commit(top, str(workspace["top_commit"]))
     for item in state["repositories"]:
         name = validate_checkout_name(item["name"])
         checkout = Path(item["checkout"])
@@ -898,8 +1020,8 @@ def admin_targets(top: Path, state: dict[str, Any]) -> list[RepositoryTarget]:
     return result
 
 
-def admin_context(top_arg: str, config_arg: str | None) -> tuple[Path, AdminConfig, list[RepositoryTarget]]:
-    top = ensure_git_repository(Path(top_arg).resolve())
+def admin_context(workspace_root_arg: str, config_arg: str | None) -> tuple[Path, AdminConfig, list[RepositoryTarget]]:
+    top = ensure_git_repository(Path(workspace_root_arg).resolve())
     state = load_resolved(top)
     config = load_admin_config(top, config_arg, tomllib.loads)
     return top, config, admin_targets(top, state)
@@ -930,8 +1052,8 @@ def admin_client_map(config: AdminConfig) -> dict[str, Any]:
     return clients
 
 
-def command_admin_policy_status(top_arg: str, config_arg: str | None) -> int:
-    top, config, targets = admin_context(top_arg, config_arg)
+def command_admin_policy_status(workspace_root_arg: str, config_arg: str | None) -> int:
+    top, config, targets = admin_context(workspace_root_arg, config_arg)
     clients = admin_client_map(config)
     for provider in config.providers:
         print(f"[provider] {provider.name}: {provider.kind} as {clients[provider.name].identity()}")
@@ -944,8 +1066,8 @@ def command_admin_policy_status(top_arg: str, config_arg: str | None) -> int:
     return 1 if failures else 0
 
 
-def command_admin_policy_diff(top_arg: str, config_arg: str | None) -> int:
-    _, config, targets = admin_context(top_arg, config_arg)
+def command_admin_policy_diff(workspace_root_arg: str, config_arg: str | None) -> int:
+    _, config, targets = admin_context(workspace_root_arg, config_arg)
     failures = 0
     for status in admin_statuses(config, targets):
         matches = status.protected and status.mode == config.baseline_mode
@@ -1046,13 +1168,13 @@ def apply_policy_mode(
 
 
 def command_admin_lock_main(
-    top_arg: str,
+    workspace_root_arg: str,
     config_arg: str | None,
     mode: str,
     lock_id: str | None,
     dry_run: bool,
 ) -> int:
-    top, config, targets = admin_context(top_arg, config_arg)
+    top, config, targets = admin_context(workspace_root_arg, config_arg)
     generated_id = f"main-{datetime_stamp()}"
     selected_id = lock_id or generated_id
     path = lock_state_path(top, selected_id)
@@ -1068,8 +1190,8 @@ def datetime_stamp() -> str:
     return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
-def command_admin_unlock_main(top_arg: str, config_arg: str | None, lock_id: str, dry_run: bool) -> int:
-    top, config, _ = admin_context(top_arg, config_arg)
+def command_admin_unlock_main(workspace_root_arg: str, config_arg: str | None, lock_id: str, dry_run: bool) -> int:
+    top, config, _ = admin_context(workspace_root_arg, config_arg)
     path = lock_state_path(top, lock_id)
     state = read_json(path)
     if state.get("operation") != "lock-main":
@@ -1104,8 +1226,8 @@ def command_admin_unlock_main(top_arg: str, config_arg: str | None, lock_id: str
     return 0
 
 
-def command_admin_policy_apply(top_arg: str, config_arg: str | None, dry_run: bool) -> int:
-    top, config, targets = admin_context(top_arg, config_arg)
+def command_admin_policy_apply(workspace_root_arg: str, config_arg: str | None, dry_run: bool) -> int:
+    top, config, targets = admin_context(workspace_root_arg, config_arg)
     return apply_policy_mode(
         top,
         config,
@@ -1118,24 +1240,24 @@ def command_admin_policy_apply(top_arg: str, config_arg: str | None, dry_run: bo
 
 
 def command_admin_protect(
-    top_arg: str,
+    workspace_root_arg: str,
     config_arg: str | None,
     branch: str,
     mode: str,
     dry_run: bool,
 ) -> int:
-    top, config, targets = admin_context(top_arg, config_arg)
+    top, config, targets = admin_context(workspace_root_arg, config_arg)
     validate_protection_branch(top, targets, branch)
     return apply_policy_mode(top, config, targets, mode, "protect", None, dry_run, branch)
 
 
 def command_admin_unprotect(
-    top_arg: str,
+    workspace_root_arg: str,
     config_arg: str | None,
     branch: str,
     dry_run: bool,
 ) -> int:
-    top, config, targets = admin_context(top_arg, config_arg)
+    top, config, targets = admin_context(workspace_root_arg, config_arg)
     validate_protection_branch(top, targets, branch)
     statuses = admin_statuses(config, targets, branch)
     clients = admin_client_map(config)
@@ -1177,13 +1299,13 @@ def release_precheck(top: Path, config: AdminConfig, targets: list[RepositoryTar
 
 
 def command_admin_release(
-    top_arg: str,
+    workspace_root_arg: str,
     config_arg: str | None,
     name: str,
     push: bool,
     dry_run: bool,
 ) -> int:
-    top, config, targets = admin_context(top_arg, config_arg)
+    top, config, targets = admin_context(workspace_root_arg, config_arg)
     path = release_state_path(top, name)
     if path.exists():
         raise RepoMgrError("E_RELEASE", f"release state already exists: {path}")
@@ -1259,8 +1381,8 @@ def continue_release(top: Path, state: dict[str, Any], path: Path, dry_run: bool
     return 0
 
 
-def command_admin_release_resume(top_arg: str, config_arg: str | None, name: str, dry_run: bool) -> int:
-    top, config, targets = admin_context(top_arg, config_arg)
+def command_admin_release_resume(workspace_root_arg: str, config_arg: str | None, name: str, dry_run: bool) -> int:
+    top, config, targets = admin_context(workspace_root_arg, config_arg)
     path = release_state_path(top, name)
     state = read_json(path)
     if state.get("operation") != "release":
@@ -1299,8 +1421,8 @@ def release_precheck_resume(
             raise RepoMgrError("E_RELEASE_PRECHECK", f"{status.target.name}: {config.branch} is not protected")
 
 
-def command_admin_audit(top_arg: str) -> int:
-    top = ensure_git_repository(Path(top_arg).resolve())
+def command_admin_audit(workspace_root_arg: str) -> int:
+    top = ensure_git_repository(Path(workspace_root_arg).resolve())
     path = admin_state_dir(top) / "audit.jsonl"
     try:
         print(path.read_text(encoding="utf-8"), end="")
@@ -1312,7 +1434,7 @@ def command_admin_audit(top_arg: str) -> int:
 def read_flat_snapshot(path: Path) -> dict[str, Any]:
     data = read_toml(path, "git_deps_flat.toml")
     workspace = data.get("workspace")
-    repositories = data.get("repository")
+    repositories = data.get("repository", [])
     if not isinstance(workspace, dict) or not isinstance(repositories, list):
         raise RepoMgrError("E_FLAT", f"invalid flat snapshot: {path}")
     required_workspace = ("top_name", "top_repository", "top_commit")
@@ -1342,13 +1464,19 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--version", action="version", version="git_repo_mgr 0.1.0")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    template_parser = subparsers.add_parser("template", help="create a git_deps.toml template without Git or network access")
+    template_parser.add_argument("-o", "--output", default=MANIFEST_NAME, help="output file, default: git_deps.toml")
+
+    root_parser = subparsers.add_parser("show-root", help="show inferred workspace without syncing or writing files")
+    root_parser.add_argument("--workspace", "-w", dest="workspace_root", help="explicit workspace directory")
+
     sync_parser = subparsers.add_parser("sync", help="recursively sync git_deps.toml")
-    sync_parser.add_argument("--top", default=".", help="top Git repository, default: current directory")
+    sync_parser.add_argument("--workspace", "-w", dest="workspace_root", help="explicit workspace; otherwise find unique ancestor state or manifest")
     sync_parser.add_argument("--flat", help="restore a generated git_deps_flat.toml snapshot")
     sync_parser.add_argument("--shallow", action="store_true", help="use depth-1 clone for new checkouts")
 
     status_parser = subparsers.add_parser("status", help="show resolved checkout status")
-    status_parser.add_argument("--top", default=".", help="top Git repository, default: current directory")
+    status_parser.add_argument("--workspace", "-w", dest="workspace_root", help="explicit workspace; otherwise find unique ancestor state or manifest")
 
     forall_parser = subparsers.add_parser("forall", help="run one shell command in every checkout")
     forall_parser.add_argument(
@@ -1359,26 +1487,26 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="shell command to execute",
     )
     forall_parser.add_argument("projects", nargs="*", help="optional top/import project names")
-    forall_parser.add_argument("--top", default=".", help="top Git repository, default: current directory")
+    forall_parser.add_argument("--workspace", "-w", dest="workspace_root", help="explicit workspace; otherwise find unique ancestor state or manifest")
     forall_parser.add_argument("--fail-fast", action="store_true", help="stop after the first failed command")
     forall_parser.add_argument("--dry-run", action="store_true", help="show planned commands only")
 
     graph_parser = subparsers.add_parser("graph", help="show saved dependency graph")
-    graph_parser.add_argument("--top", default=".", help="top Git repository, default: current directory")
+    graph_parser.add_argument("--workspace", "-w", dest="workspace_root", help="explicit workspace; otherwise find unique ancestor state or manifest")
     graph_parser.add_argument("--format", choices=("tree", "json"), default="tree")
 
     flat_parser = subparsers.add_parser("export-flat", help="export the resolved commit snapshot")
-    flat_parser.add_argument("--top", default=".", help="top Git repository, default: current directory")
+    flat_parser.add_argument("--workspace", "-w", dest="workspace_root", help="explicit workspace; otherwise find unique ancestor state or manifest")
     flat_parser.add_argument("-o", "--output", default="git_deps_flat.toml", help="snapshot output path")
 
     switch_parser = subparsers.add_parser("switch", help="switch every checkout to one branch, tag, or commit")
     switch_parser.add_argument("ref", help="branch, tag, or commit")
-    switch_parser.add_argument("--top", default=".", help="top Git repository, default: current directory")
+    switch_parser.add_argument("--workspace", "-w", dest="workspace_root", help="explicit workspace; otherwise find unique ancestor state or manifest")
     switch_parser.add_argument("--dry-run", action="store_true", help="show planned changes only")
 
     tag_parser = subparsers.add_parser("tag", help="create one annotated tag in every checkout")
     tag_parser.add_argument("name", help="tag name")
-    tag_parser.add_argument("--top", default=".", help="top Git repository, default: current directory")
+    tag_parser.add_argument("--workspace", "-w", dest="workspace_root", help="explicit workspace; otherwise find unique ancestor state or manifest")
     tag_parser.add_argument("-m", "--message", help="annotated tag message")
     tag_parser.add_argument("--push", action="store_true", help="push tags after local creation")
     tag_parser.add_argument("--dry-run", action="store_true", help="show planned changes only")
@@ -1387,33 +1515,33 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     admin_subparsers = admin_parser.add_subparsers(dest="admin_command", required=True)
 
     policy_status_parser = admin_subparsers.add_parser("policy-status", help="show default branch protection")
-    policy_status_parser.add_argument("--top", default=".", help="top Git repository, default: current directory")
+    policy_status_parser.add_argument("--workspace", "-w", dest="workspace_root", help="explicit workspace; otherwise find unique ancestor state or manifest")
     policy_status_parser.add_argument("--config", help="admin TOML configuration path")
 
     policy_diff_parser = admin_subparsers.add_parser("policy-diff", help="compare default branch policy with baseline")
-    policy_diff_parser.add_argument("--top", default=".", help="top Git repository, default: current directory")
+    policy_diff_parser.add_argument("--workspace", "-w", dest="workspace_root", help="explicit workspace; otherwise find unique ancestor state or manifest")
     policy_diff_parser.add_argument("--config", help="admin TOML configuration path")
 
     policy_apply_parser = admin_subparsers.add_parser("policy-apply", help="apply baseline default branch policy")
-    policy_apply_parser.add_argument("--top", default=".", help="top Git repository, default: current directory")
+    policy_apply_parser.add_argument("--workspace", "-w", dest="workspace_root", help="explicit workspace; otherwise find unique ancestor state or manifest")
     policy_apply_parser.add_argument("--config", help="admin TOML configuration path")
     policy_apply_parser.add_argument("--dry-run", action="store_true", help="show planned changes only")
 
     protect_parser = admin_subparsers.add_parser("protect", help="protect one branch across all repositories")
     protect_parser.add_argument("branch", help="existing remote branch to protect")
-    protect_parser.add_argument("--top", default=".", help="top Git repository, default: current directory")
+    protect_parser.add_argument("--workspace", "-w", dest="workspace_root", help="explicit workspace; otherwise find unique ancestor state or manifest")
     protect_parser.add_argument("--config", help="admin TOML configuration path")
     protect_parser.add_argument("--mode", choices=("read-only", "integration-only"), default="integration-only")
     protect_parser.add_argument("--dry-run", action="store_true", help="show planned changes only")
 
     unprotect_parser = admin_subparsers.add_parser("unprotect", help="remove one branch protection across all repositories")
     unprotect_parser.add_argument("branch", help="existing remote branch to unprotect")
-    unprotect_parser.add_argument("--top", default=".", help="top Git repository, default: current directory")
+    unprotect_parser.add_argument("--workspace", "-w", dest="workspace_root", help="explicit workspace; otherwise find unique ancestor state or manifest")
     unprotect_parser.add_argument("--config", help="admin TOML configuration path")
     unprotect_parser.add_argument("--dry-run", action="store_true", help="show planned changes only")
 
     lock_parser = admin_subparsers.add_parser("lock-main", help="temporarily lock the default branch across all repositories")
-    lock_parser.add_argument("--top", default=".", help="top Git repository, default: current directory")
+    lock_parser.add_argument("--workspace", "-w", dest="workspace_root", help="explicit workspace; otherwise find unique ancestor state or manifest")
     lock_parser.add_argument("--config", help="admin TOML configuration path")
     lock_parser.add_argument("--mode", choices=("read-only", "integration-only"), default="read-only")
     lock_parser.add_argument("--lock-id", help="stable lock state identifier")
@@ -1421,80 +1549,88 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
     unlock_parser = admin_subparsers.add_parser("unlock-main", help="restore a saved main branch policy")
     unlock_parser.add_argument("lock_id", help="lock identifier returned by lock-main")
-    unlock_parser.add_argument("--top", default=".", help="top Git repository, default: current directory")
+    unlock_parser.add_argument("--workspace", "-w", dest="workspace_root", help="explicit workspace; otherwise find unique ancestor state or manifest")
     unlock_parser.add_argument("--config", help="admin TOML configuration path")
     unlock_parser.add_argument("--dry-run", action="store_true", help="show planned changes only")
 
     release_parser = admin_subparsers.add_parser("release", help="snapshot and tag the protected default branch integration")
     release_parser.add_argument("name", help="release tag name")
-    release_parser.add_argument("--top", default=".", help="top Git repository, default: current directory")
+    release_parser.add_argument("--workspace", "-w", dest="workspace_root", help="explicit workspace; otherwise find unique ancestor state or manifest")
     release_parser.add_argument("--config", help="admin TOML configuration path")
     release_parser.add_argument("--push", action="store_true", help="push release tags after local creation")
     release_parser.add_argument("--dry-run", action="store_true", help="show planned actions only")
 
     resume_parser = admin_subparsers.add_parser("release-resume", help="continue an interrupted release")
     resume_parser.add_argument("name", help="release tag name")
-    resume_parser.add_argument("--top", default=".", help="top Git repository, default: current directory")
+    resume_parser.add_argument("--workspace", "-w", dest="workspace_root", help="explicit workspace; otherwise find unique ancestor state or manifest")
     resume_parser.add_argument("--config", help="admin TOML configuration path")
     resume_parser.add_argument("--dry-run", action="store_true", help="show planned actions only")
 
     audit_parser = admin_subparsers.add_parser("audit", help="print local admin audit records")
-    audit_parser.add_argument("--top", default=".", help="top Git repository, default: current directory")
+    audit_parser.add_argument("--workspace", "-w", dest="workspace_root", help="explicit workspace; otherwise find unique ancestor state or manifest")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
+        if args.command == "template":
+            return command_template(args.output)
+        top, source = locate_workspace(args.workspace_root)
+        args.workspace_root = str(top)
+        if args.command in {"sync", "show-root"}:
+            print(f"root_dir: {top} ({source})")
+        if args.command == "show-root":
+            return 0
         if args.command == "sync":
             if args.flat:
-                return command_sync_flat(args.top, args.flat, args.shallow)
-            return command_sync(args.top, args.shallow)
+                return command_sync_flat(args.workspace_root, args.flat, args.shallow)
+            return command_sync(args.workspace_root, args.shallow)
         if args.command == "status":
-            return command_status(args.top)
+            return command_status(args.workspace_root)
         if args.command == "forall":
             return command_forall(
-                args.top,
+                args.workspace_root,
                 args.shell_command,
                 args.projects,
                 args.fail_fast,
                 args.dry_run,
             )
         if args.command == "graph":
-            return command_graph(args.top, args.format)
+            return command_graph(args.workspace_root, args.format)
         if args.command == "export-flat":
-            return command_export_flat(args.top, args.output)
+            return command_export_flat(args.workspace_root, args.output)
         if args.command == "switch":
-            return command_switch(args.top, args.ref, args.dry_run)
+            return command_switch(args.workspace_root, args.ref, args.dry_run)
         if args.command == "tag":
-            return command_tag(args.top, args.name, args.message, args.push, args.dry_run)
+            return command_tag(args.workspace_root, args.name, args.message, args.push, args.dry_run)
         if args.command == "admin":
             if args.admin_command == "policy-status":
-                return command_admin_policy_status(args.top, args.config)
+                return command_admin_policy_status(args.workspace_root, args.config)
             if args.admin_command == "policy-diff":
-                return command_admin_policy_diff(args.top, args.config)
+                return command_admin_policy_diff(args.workspace_root, args.config)
             if args.admin_command == "policy-apply":
-                return command_admin_policy_apply(args.top, args.config, args.dry_run)
+                return command_admin_policy_apply(args.workspace_root, args.config, args.dry_run)
             if args.admin_command == "protect":
                 return command_admin_protect(
-                    args.top,
+                    args.workspace_root,
                     args.config,
                     args.branch,
                     args.mode,
                     args.dry_run,
                 )
             if args.admin_command == "unprotect":
-                return command_admin_unprotect(args.top, args.config, args.branch, args.dry_run)
+                return command_admin_unprotect(args.workspace_root, args.config, args.branch, args.dry_run)
             if args.admin_command == "lock-main":
-                return command_admin_lock_main(args.top, args.config, args.mode, args.lock_id, args.dry_run)
+                return command_admin_lock_main(args.workspace_root, args.config, args.mode, args.lock_id, args.dry_run)
             if args.admin_command == "unlock-main":
-                return command_admin_unlock_main(args.top, args.config, args.lock_id, args.dry_run)
+                return command_admin_unlock_main(args.workspace_root, args.config, args.lock_id, args.dry_run)
             if args.admin_command == "release":
-                return command_admin_release(args.top, args.config, args.name, args.push, args.dry_run)
+                return command_admin_release(args.workspace_root, args.config, args.name, args.push, args.dry_run)
             if args.admin_command == "release-resume":
-                return command_admin_release_resume(args.top, args.config, args.name, args.dry_run)
+                return command_admin_release_resume(args.workspace_root, args.config, args.name, args.dry_run)
             if args.admin_command == "audit":
-                return command_admin_audit(args.top)
+                return command_admin_audit(args.workspace_root)
     except (RepoMgrError, AdminError) as exc:
         print(f"ERROR [{exc.code}]: {exc.message}", file=sys.stderr)
         for detail in exc.details:

@@ -39,7 +39,7 @@
         "onCommand:dmgHwTool.rtlFlist.refreshCores",
         "onCommand:dmgHwTool.gitRepo.status",
         "onCommand:dmgHwTool.gitRepo.sync",
-        "onCommand:dmgHwTool.gitRepo.graph",
+        "onCommand:dmgHwTool.gitRepo.template",
         "onView:dmgHwTool.rtlCores"
     ],
     "contributes": {
@@ -147,8 +147,8 @@
                 "title": "HW Tool: Sync Git Repositories..."
             },
             {
-                "command": "dmgHwTool.gitRepo.graph",
-                "title": "HW Tool: Open Git Dependency Graph..."
+                "command": "dmgHwTool.gitRepo.template",
+                "title": "HW Tool: Create Git Dependencies"
             }
         ],
         "menus": {
@@ -224,7 +224,7 @@
                     "group": "navigation@81"
                 },
                 {
-                    "command": "dmgHwTool.gitRepo.graph",
+                    "command": "dmgHwTool.gitRepo.template",
                     "when": "resourceFilename == git_deps.toml",
                     "group": "navigation@82"
                 }
@@ -266,8 +266,8 @@
                     "group": "navigation@81"
                 },
                 {
-                    "command": "dmgHwTool.gitRepo.graph",
-                    "when": "resourceFilename == git_deps.toml",
+                    "command": "dmgHwTool.gitRepo.template",
+                    "when": "explorerResourceIsFolder || resourceFilename == git_deps.toml",
                     "group": "navigation@82"
                 }
             ],
@@ -336,7 +336,7 @@
     },
     "scripts": {
         "check": "node --check src/extension.js && node --check src/hw_tool_client.js && node --check src/editor_context.js && node --check src/workspace_context.js && node --check src/tools/rtl_inst.js && node --check src/tools/rtl_dummy.js && node --check src/tools/gen_tb.js && node --check src/tools/mem_tool.js && node --check src/tools/rtl_flist.js && node --check src/tools/git_repo.js",
-        "test": "node test/test_helpers.js && node test/test_rtl_root.js",
+        "test": "node test/test_helpers.js && node test/test_rtl_root.js && node test/test_git_repo.js",
         "sync-snippets": "python scripts/sync_resources.py",
         "sync-runtime": "python scripts/sync_runtime.py",
         "package": "npm run check && npm test && npm run sync-snippets && npm run sync-runtime && python scripts/pack_vsix.py"
