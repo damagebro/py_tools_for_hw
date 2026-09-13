@@ -24,6 +24,7 @@ python -B /abs/path/to/git_repo_mgr/src/git_repo_mgr.py
 
 | command                                             | 用途                                          |
 | --------------------------------------------------- | --------------------------------------------- |
+| `<git_repo_mgr> template`                           | 创建 `git_deps.toml`的模板                    |
 | `<git_repo_mgr> sync [--shallow]`                   | 递归同步 `git_deps.toml`                      |
 | `<git_repo_mgr> sync --flat git_deps_flat.toml`     | 按固定 commit 快照恢复 workspace              |
 | `<git_repo_mgr> status`                             | 显示分支、提交、状态汇总及 dirty/missing 明细 |
@@ -216,7 +217,7 @@ gitlab_allowed_to_unprotect = [{ access_level = 40 }]
 | `admin policy-apply [--dry-run]`           | 对默认分支应用日常 baseline 策略                                        |
 | `admin protect <branch> [--mode read-only\ | integration-only]`                                                      | 先确认全部 `origin/<branch>` 存在，再批量建立指定分支保护 |
 | `admin unprotect <branch>`                 | 先确认全部 `origin/<branch>` 存在，再批量删除指定分支保护               |
-| `admin lock-main [--mode read-only\        | integration-only]`                                                      | 保存原始策略后，批量临时锁定默认分支 |
+| `admin lock-main [--mode read-only\        | integration-only]`                                                      | 保存原始策略后，批量临时锁定默认分支                      |
 | `admin unlock-main <lock_id>`              | 按保存的原始 API 策略精确恢复                                           |
 | `admin release <tag> [--push]`             | 校验 clean、受保护默认分支、`HEAD == origin/<branch>`，保存快照并打 tag |
 | `admin release-resume <tag>`               | 按 release 状态继续未完成 tag/push；默认分支或 commit 变化时停止        |
