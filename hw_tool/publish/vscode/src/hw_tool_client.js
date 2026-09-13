@@ -53,11 +53,42 @@ async function runtimeHwToolPath(context) {
 
 function configuredPython(resource) {
     const configuration = vscode.workspace.getConfiguration("dmgHwTool", resource);
-    return configuration.get("pythonPath", "python").trim() || "python";
+    return configuration.get("pythonPath", "").trim();
+}
+
+
+async function resolvePython(configured, cwd, output, platform = process.platform) {
+    const candidates = configured ? [[configured, []]] : [
+        ["python", []], ["python3", []], ...(platform === "win32" ? [["py", ["-3"]]] : [])
+    ];
+    const failures = [];
+    const probe = "import sys,json; print(json.dumps({'version':list(sys.version_info[:3]),'executable':sys.executable}))";
+    for (const [command, prefix] of candidates) {
+        try {
+            const result = await runProcess(command, [...prefix, "-B", "-c", probe], cwd, output, "Python version check", { echoStdout: false });
+            const info = JSON.parse(result.stdout.trim());
+            if (!Array.isArray(info.version) || info.version.length < 2 ||
+                !info.version.every(Number.isInteger) ||
+                !(info.version[0] > 3 || (info.version[0] === 3 && info.version[1] >= 11))) {
+                throw new Error(`Python ${info.version} does not meet Python 3.11+`);
+            }
+            if (typeof info.executable !== "string" || !path.isAbsolute(info.executable)) {
+                throw new Error("Python did not report an absolute executable path");
+            }
+            output.appendLine(`Python ${info.version.join(".")}: ${info.executable}`);
+            return info.executable;
+        }
+        catch (error) {
+            failures.push(`${command}: ${error.message}`);
+        }
+    }
+    throw new Error(`${configured ? "Configured Python is invalid" : "No Python 3.11+ found"}. Set dmgHwTool.pythonPath or install Python 3.11+. ${failures.join("; ")}`);
 }
 
 
 async function checkPythonRuntime(pythonPath, cwd, output, packages = []) {
+    const executable = await resolvePython(pythonPath, cwd, output);
+    if (!packages.length) return executable;
     const imports = packages.map((packageName) => `import ${packageName}`).join("; ");
     const code = [
         "import sys",
@@ -66,7 +97,7 @@ async function checkPythonRuntime(pythonPath, cwd, output, packages = []) {
     ].filter(Boolean).join("; ");
     try {
         await runProcess(
-            pythonPath,
+            executable,
             ["-B", "-c", code],
             cwd,
             output,
@@ -74,11 +105,9 @@ async function checkPythonRuntime(pythonPath, cwd, output, packages = []) {
         );
     }
     catch (error) {
-        const dependencyText = packages.length
-            ? ` or missing ${packages.join("/")}`
-            : "";
-        throw new Error(`System Python is unavailable${dependencyText}: ${error.message}`);
+        throw new Error(`Python dependency check failed for ${executable}. Install ${packages.join("/")} in this interpreter: ${error.message}`);
     }
+    return executable;
 }
 
 
@@ -92,9 +121,9 @@ async function runHwTool(context, toolArgs, options) {
         echoStdout = true,
         acceptedExitCodes = [0]
     } = options;
-    const pythonPath = configuredPython(resource);
+    let pythonPath = configuredPython(resource);
     const hwToolPath = await runtimeHwToolPath(context);
-    await checkPythonRuntime(pythonPath, cwd, output, requiredPackages);
+    pythonPath = await checkPythonRuntime(pythonPath, cwd, output, requiredPackages);
     return runProcess(
         pythonPath,
         ["-X", "utf8", "-B", hwToolPath, "de", ...toolArgs],
@@ -107,6 +136,7 @@ async function runHwTool(context, toolArgs, options) {
 
 
 module.exports = {
+    resolvePython,
     checkPythonRuntime,
     configuredPython,
     runHwTool,

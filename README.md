@@ -24,13 +24,11 @@
 3. 按`Ctrl+Shift+P`输入`HW Tool:`选择命令，或使用对应文件的编辑器右键菜单。
 4. 编辑Verilog/SystemVerilog时，输入`rtl-`使用代码片段。
 
-插件内置工具源码，生成类命令调用本机Python；代码片段展开无需Python。Python不在PATH时，通过`dmgHwTool.pythonPath`指定解释器。
-
 完整命令、配置与安装方式见[VS Code扩展说明](hw_tool/publish/vscode/README.md)。
 
 ## 更多资源
 
-- **总线验证示例**：[AXI VIP](py_rtl_sim/sim_axi_vip/README.md)、[APB VIP](py_rtl_sim/sim_apb_vip/README.md)、[AHB-Lite VIP](py_rtl_sim/sim_ahb_vip/README.md)。
+- **飞书文档**：[HW Tool 文档中心](https://my.feishu.cn/wiki/XwJPwteoEiu9hNkGCfkcvLaynGc)。
 - **命令行与发布**：[HW Tool CLI](hw_tool/README.md)、[发布说明](hw_tool/publish/README.md)。
 - **配套RTL库**：[com仓库][com-repo]提供Common IP、AXI/DMA和CSR bus模块，可与本工具集生成的RTL配套集成。
 - **配套文档**：[CSR bus][com-csr]、[工艺模板][com-impl]、[Common IP][com-common]。

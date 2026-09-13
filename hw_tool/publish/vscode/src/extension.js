@@ -188,7 +188,7 @@ async function openToolDocumentation(context, requestedName, output) {
         );
         await fs.mkdir(previewDirectory, { recursive: true });
         const readmeUri = vscode.Uri.file(readmePath);
-        const pythonPath = configuredPython(readmeUri);
+        let pythonPath = configuredPython(readmeUri);
         const hwToolPath = await runtimeHwToolPath(context);
         const args = [
             "-B",
@@ -209,7 +209,7 @@ async function openToolDocumentation(context, requestedName, output) {
                 cancellable: false
             },
             async () => {
-                await checkPythonRuntime(
+                pythonPath = await checkPythonRuntime(
                     pythonPath,
                     path.dirname(readmePath),
                     output,
@@ -331,7 +331,7 @@ async function convertMarkdownToHtml(resource, output, context, previewOnly = fa
     }
 
     const sourceDirectory = path.dirname(sourcePath);
-    const pythonPath = configuredPython(sourceUri);
+    let pythonPath = configuredPython(sourceUri);
     output.show(true);
     try {
         const hwToolPath = await runtimeHwToolPath(context);
@@ -352,7 +352,7 @@ async function convertMarkdownToHtml(resource, output, context, previewOnly = fa
                 cancellable: false
             },
             async () => {
-                await checkPythonRuntime(
+                pythonPath = await checkPythonRuntime(
                     pythonPath,
                     sourceDirectory,
                     output,
@@ -405,7 +405,7 @@ async function generateCsr(nested, output, context) {
     }
     const outputDirectory = csrOutputDirectory(editor.document.uri);
     await fs.mkdir(outputDirectory, { recursive: true });
-    const pythonPath = configuredPython(editor.document.uri);
+    let pythonPath = configuredPython(editor.document.uri);
     output.show(true);
     try {
         const hwToolPath = await runtimeHwToolPath(context);
@@ -417,7 +417,7 @@ async function generateCsr(nested, output, context) {
             { location: vscode.ProgressLocation.Notification, title: "Generating CSR...", cancellable: false },
             async () => {
                 const cwd = path.dirname(editor.document.uri.fsPath);
-                await checkPythonRuntime(
+                pythonPath = await checkPythonRuntime(
                     pythonPath,
                     cwd,
                     output,
@@ -508,7 +508,7 @@ async function createCsrTemplate(interactive, output, context) {
         return;
     }
 
-    const pythonPath = configuredPython();
+    let pythonPath = configuredPython();
     output.show(true);
     try {
         const hwToolPath = await runtimeHwToolPath(context);
@@ -531,7 +531,7 @@ async function createCsrTemplate(interactive, output, context) {
                 cancellable: false
             },
             async () => {
-                await checkPythonRuntime(
+                pythonPath = await checkPythonRuntime(
                     pythonPath,
                     location.directory,
                     output,

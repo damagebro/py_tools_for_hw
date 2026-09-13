@@ -320,8 +320,8 @@
                 },
                 "dmgHwTool.pythonPath": {
                     "type": "string",
-                    "default": "python",
-                    "description": "System Python command or absolute path. Python 3.11+ with jinja2, openpyxl, and Markdown is required."
+                    "default": "",
+                    "description": "Empty: find Python 3.11+ using python, python3, then py -3 on Windows. Set a command or absolute path to use only that interpreter. Required packages are checked separately."
                 },
                 "dmgHwTool.preview.theme": {
                     "type": "string",
@@ -343,7 +343,7 @@
     },
     "scripts": {
         "check": "node --check src/extension.js && node --check src/hw_tool_client.js && node --check src/editor_context.js && node --check src/workspace_context.js && node --check src/tools/rtl_inst.js && node --check src/tools/rtl_dummy.js && node --check src/tools/gen_tb.js && node --check src/tools/mem_tool.js && node --check src/tools/rtl_flist.js && node --check src/tools/git_repo.js",
-        "test": "node test/test_helpers.js && node test/test_rtl_root.js && node test/test_git_repo.js",
+        "test": "node test/test_helpers.js && node test/test_rtl_root.js && node test/test_git_repo.js && node test/test_python.js",
         "sync-snippets": "python scripts/sync_resources.py",
         "sync-runtime": "python scripts/sync_runtime.py",
         "package": "npm run check && npm test && npm run sync-snippets && npm run sync-runtime && python scripts/pack_vsix.py"

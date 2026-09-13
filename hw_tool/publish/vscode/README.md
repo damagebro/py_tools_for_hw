@@ -1,70 +1,37 @@
-# HW Tool VS Code 发布
+# HW Tool
 
-本扩展是 `hw_tool` 的编辑器交互层。打包时会把已注册工具源码复制到插件内部的 `runtime/hw_tool/`；CSR 生成直接调用该 runtime，不要求用户另行部署 `hw_tool` 或配置 `PATH`。SystemVerilog snippets 由仓库中的 `py_rtl_snippet` 生成后打包进扩展。
+面向芯片前端与 RTL 开发的工具集，支持命令行独立使用、HW Tool Hub 统一调用和 VS Code 插件交互。
 
-## 当前功能与命令
+插件内置工具源码，不需要另行部署 `hw_tool` 或配置其 PATH。生成类命令调用本机 Python；代码片段展开无需 Python。Common IP 例化已固化在插件中，使用时不访问 com 仓库。
 
-按 `Ctrl+Shift+P` 打开命令面板，输入 `HW Tool:` 可查看全部命令。编辑器右键菜单提供 Markdown/CSR 命令及 RTL instance 插入或复制；`.v/.sv` 的编辑器和 Explorer 右键菜单均可调用对应 RTL 工具。
+## 工具一览
 
-| 工具/功能组        | VS Code 命令或入口                                 | 使用条件                           | 说明                                                                                                                                |
-| ------------------ | -------------------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| **通用功能**       | `HW Tool: Open Tool Documentation...`              | Python 环境依赖已安装              | 从已注册工具中选择 README，转换为 HTML 后在 Webview 中打开。                                                                        |
-|                    | `HW Tool: Change Preview Theme...`                 | 无                                 | 设置文档和 Markdown HTML 预览主题，可选 `Light`、`Dark` 或 `Follow VS Code`。                                                       |
-|                    | `HW Tool: Convert Markdown to HTML...`             | 当前文件为 `.md/.markdown`         | 自动生成 TOC 并补章节编号，在 Markdown 同目录输出同名 `.html`，随后在 Webview 中打开；已有输出仍确认覆盖。                          |
-|                    | `HW Tool: Preview Markdown as HTML...`             | 当前文件为 `.md/.markdown`         | 自动生成 TOC 并补章节编号，直接在 Webview 中预览，不写 HTML；未保存的 Markdown 先保存。                                             |
-| **py_rtl_snippet** | 输入 `rtl-` 前缀                                   | 当前文件为 `.v/.sv`                | 由 VS Code 原生补全列出代码片段；`rtl-inst-<module>` 提供发布时固化的常用 `com` module 例化。                                       |
-| **rtl_inst**       | `HW Tool: Replace Selected RTL Path With Instance` | `.v/.sv` 中选中绝对 RTL 路径       | 调用 `rtl_inst --stdout`，成功后用 instance snippet 一次性替换选区；失败时选区保持不变。                                            |
-|                    | `HW Tool: Insert RTL Instance From File...`        | 当前文件为 `.v/.sv`                | 图形选择一个 `.v/.sv` 文件，在当前光标位置插入 instance snippet。                                                                   |
-|                    | `HW Tool: Copy RTL Instance`                       | 当前或 Explorer 选中 `.v/.sv`      | 自动使用当前文件或 Explorer 右键文件，生成 instance 并写入剪贴板，用户使用 `Ctrl+V` 粘贴。                                          |
-| **rtl_dummy**      | `HW Tool: Generate RTL Dummy...`                   | 当前或 Explorer 选中 `.v/.sv`      | 只选择一次 `bbox/stub/port_swap`，生成到源文件旁的 `out/rtl_dummy/`，随后打开结果文件。                                             |
-| **gen_tb**         | `HW Tool: Generate Empty TB Environment`           | 当前 Terminal 可提供 cwd           | 在 Terminal cwd 的 `out/sim/` 生成空 TB 环境；完成后可打开 README 或在生成目录打开 Terminal。                                       |
-|                    | `HW Tool: Generate TB From Current Filelist...`    | 当前或 Explorer 选中 `.f`          | 只输入一次 DUT top module，在 filelist 同目录的 `out/sim/` 生成 TB 环境。                                                           |
-| **mem_tool**       | `HW Tool: Open Memory Tool Documentation`          | Python 环境依赖已安装              | 将插件内置的 `mem_tool/README.md` 转换为 HTML，并在 Webview 中打开。                                                                |
-|                    | `HW Tool: Generate Memory Shell...`                | 当前 Terminal 可提供 cwd           | 只输入一次 subsystem prefix，在 Terminal cwd 的 `out/mem_tool/` 执行 `init` 并打开生成的 shell。                                    |
-|                    | `HW Tool: Integrate Memory From Excel`             | 当前或 Explorer 选中 `.xlsx`       | 输入 SRAM shell prefix，执行 `inst` 并打开集成 PHY instance 后的 memory shell。                                                     |
-| **csr_tool**       | `HW Tool: Open CSR Documentation`                  | Python 环境依赖已安装              | 将插件内置的 `csr_tool/README.md` 转换为 HTML，并在 Webview 中打开。                                                                |
-|                    | `HW Tool: Create CSR Template...`                  | 已打开 Terminal、文件或工程        | 四选一生成 Markdown/Excel 模板，并可选择是否包含 `base_info`；文件名固定为 `reg_define.md/.xlsx`。                                  |
-|                    | `HW Tool: Create Default CSR Template`             | 已打开 Terminal、文件或工程        | 不弹出选项，直接生成仅包含 `reg_define` 的 `reg_define.md`。                                                                        |
-|                    | `HW Tool: Generate CSR (Single)`                   | 当前文件为 CSR `.md/.xlsx`         | 保存当前输入并生成单模块 CSR，固定输出到输入文件同目录的 `out/`。                                                                   |
-|                    | `HW Tool: Generate CSR (Nested)`                   | 当前文件为 CSR `.md/.xlsx`         | 以 `--nested` 模式生成多层 CSR，固定输出到输入文件同目录的 `out/`；完成后可直接打开 `_tree.html`。                                  |
-|                    | `HW Tool: Open CSR Tree HTML`                      | 当前文件为 CSR `.md/.xlsx`         | 在当前输入对应的 `out/doc/` 中查找 `_tree.html`；存在多个文件时先选择，再使用 Webview 打开。                                        |
-|                    | `HW Tool: Insert CSR Register Row...`              | 当前文件为 CSR Markdown            | 只选择一次 `reg_type`，随后在当前行后插入对应的 `reg_define` 默认行，由用户直接修改表格内容。                                       |
-| **rtl_flist_mgr**  | `HW Tool: Set RTL Workspace Root...`               | 命令面板或 RTL Cores 文件夹按钮    | 选择目录、初始化标记并保存 workspace 设置，自动刷新 core 列表。                                                                     |
-|                    | `HW Tool: Generate RTL Filelist...`                | 当前或 Explorer 选中 `.toml/.core` | 选择 `sim/synth/lint/emu/fpga`，刷新 core 索引并生成到 core 旁的 `out/flist/`。                                                     |
-|                    | `HW Tool: Refresh RTL Core List`                   | 已打开文件、Terminal 或 workspace  | 扫描推断出的 workspace，在 Explorer 的 `RTL Cores` 视图列出本体 core；单击条目打开 corefile。                                       |
-| **git_repo_mgr**   | `HW Tool: Create Git Dependencies`                 | 当前 Terminal 可提供 cwd           | 在当前 Terminal cwd 生成并打开 `git_deps.toml`；已存在则直接打开，不覆盖；不向上查找 workspace。                                 |
-|                    | `HW Tool: Git Repository Status`                   | 当前 workspace，已执行过 sync      | 在 HW Tool Output 中查看分支/ref、commit、状态表、汇总及异常明细；尚未 sync 时给出提示。                                            |
-|                    | `HW Tool: Sync Git Repositories...`                | 当前 Git workspace                 | 调用 `sync`，选择 full/shallow clone，展示 workspace 和导入位置并确认后递归补齐依赖；日志显示在 HW Tool Output，保留已有 checkout。 |
+| 工具与文档                                                                                        | 简介                                                            |
+| ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| [hw_tool](https://github.com/damagebro/py_tools_for_hw/blob/main/hw_tool/README.md)               | 统一工具入口；可集成其他 group，也可被上层 Hub 集成。           |
+| [git_repo_mgr](https://github.com/damagebro/py_tools_for_hw/blob/main/git_repo_mgr/README.md)     | 管理 Git 仓库依赖，支持同步、版本冲突检查与批量操作。           |
+| [rtl_flist_mgr](https://github.com/damagebro/py_tools_for_hw/blob/main/rtl_flist_mgr/README.md)   | 解析 core 依赖，结合 TOML、.core 与 legacy.f 生成多模式 flist。 |
+| [csr_tool](https://github.com/damagebro/py_tools_for_hw/blob/main/csr_tool/README.md)             | 从 Markdown / Excel 生成 RTL、文档、UVM RAL 与 C Header。       |
+| [mem_tool](https://github.com/damagebro/py_tools_for_hw/blob/main/mem_tool/README.md)             | 整理 SRAM 需求，生成 memory shell 并集成 PHY。                  |
+| [gen_rtl_inst](https://github.com/damagebro/py_tools_for_hw/blob/main/gen_rtl_inst/README.md)     | 提取 RTL 模块参数和端口，生成例化代码片段。                     |
+| [gen_rtl_dummy](https://github.com/damagebro/py_tools_for_hw/blob/main/gen_rtl_dummy/README.md)   | 生成 bbox、stub 或端口方向交换的 RTL 模块。                     |
+| [py_rtl_snippet](https://github.com/damagebro/py_tools_for_hw/blob/main/py_rtl_snippet/README.md) | 生成语句、总线端口及 Common IP 例化 snippet。                   |
+| [gen_tb](https://github.com/damagebro/py_tools_for_hw/blob/main/py_rtl_sim/gen_tb_demo/README.md) | 生成包含 testbench、filelist、环境脚本与 Makefile 的仿真框架。  |
+| [py_md2html](https://github.com/damagebro/py_tools_for_hw/blob/main/py_md2html/README.md)         | 将 Markdown 转为 HTML，提供目录和主题等阅读功能。               |
 
-CSR 模板优先生成到当前激活 Terminal 的工作目录。Terminal 未启用 Shell Integration、无法报告当前目录时，依次回退到当前文件目录和 workspace 根目录。Markdown 生成后在 VS Code 中打开；Excel 生成后使用系统默认的 Office/WPS 打开，以保留数据验证下拉菜单。
+## 快速开始
 
-## 准备资源
-
-在本仓库根目录执行：
-
-```bash
-python -B hw_tool/publish/vscode/scripts/sync_resources.py
-```
-
-该步骤会把 `py_rtl_snippet` 的最新 Markdown 片段生成为 `resources/systemverilog.code-snippets`。其中 `rtl-inst` 表格在维护者本地读取同级 `com` 仓库，并通过 `gen_rtl_inst` 固化常用 module 例化；插件用户不访问 `com`。CSR 模板由插件内置 runtime 调用 `csr_tool template` 动态生成，不再复制整份 `reg_template.md`。
-
-生成插件内置 runtime：
-
-```bash
-npm run sync-runtime
-```
-
-该步骤复用 `hw_tool/publish/build_release.py`，将 `csr_tool`、`rtl_inst`、`rtl_dummy`、`gen_tb`、`md2html`、`git_repo_mgr`、`rtl_flist_mgr` 与 `mem_tool` 的源码复制到 `runtime/hw_tool/repository/`。`runtime/` 是构建产物，已 Git ignore。
-
-## 系统依赖
-
-插件不内置 Python。安装 `.vsix` 的机器需要 Python 3.11+，并具备 CSR 所需依赖：
+1. 在 VS Code 扩展中搜索 `@id:damagebro.dmg-hw-tool` 安装，也可通过 VSIX 安装。
+2. 准备 Python 3.11+，安装依赖：
 
 ```bash
 python -m pip install jinja2 openpyxl Markdown
 ```
 
-默认调用 `python`。若 Python 不在 `PATH`，在 VS Code settings 中配置其绝对路径：
+3. 按 `Ctrl+Shift+P`，输入 `HW Tool:` 选择命令，也可使用对应文件的右键菜单。
+4. 编辑 Verilog/SystemVerilog 时输入 `rtl-`，选择代码片段。
+
+默认自动依次尝试 `python`、`python3`，Windows 再尝试 `py -3`，选择首个满足 Python 3.11+ 的解释器。也可在 VS Code 设置中指定：
 
 ```json
 {
@@ -72,31 +39,63 @@ python -m pip install jinja2 openpyxl Markdown
 }
 ```
 
-## 调试
+该设置留空时自动查找；明确配置后仅使用该解释器，不可用或版本过低时报错，不自动回退。依赖缺失时提示在选中的解释器中安装，不切换环境或自动安装。
 
-在 VS Code 中打开 `hw_tool/publish/vscode/`，按 `F5` 启动 `Run HW Tool VS Code Extension`。新的 Extension Development Host 窗口会加载插件；在该窗口的命令面板中运行 `HW Tool:` 命令。
+## 命令速查
 
-调试前先执行 `npm run sync-runtime`。Extension Development Host 会使用插件目录的 `runtime/hw_tool/`，因此行为与最终 `.vsix` 一致。
+以下命令均带 `HW Tool:` 前缀，代码片段除外。RTL 操作支持 `.v/.sv`；生成前请保存当前输入。
 
-## gen_tb 与 mem_tool
+| 工具               | 命令或入口                                | 说明                                                               |
+| ------------------ | ----------------------------------------- | ------------------------------------------------------------------ |
+| **通用功能**       | `Open Tool Documentation...`              | 选择工具 README，以 HTML 预览。                                    |
+|                    | `Change Preview Theme...`                 | 切换浅色、深色或跟随 VS Code 的预览主题。                          |
+|                    | `Convert Markdown to HTML...`             | 当前 Markdown 转 HTML，自动加目录和编号；覆盖前确认。              |
+|                    | `Preview Markdown as HTML...`             | 直接预览当前 Markdown，不写 HTML。                                 |
+| **py_rtl_snippet** | 输入 `rtl-` 前缀                          | 语句、总线端口及 `rtl-inst-<module>` 常用 IP 例化。                |
+| **rtl_inst**       | `Replace Selected RTL Path With Instance` | 选中绝对 RTL 路径后替换为例化；失败不修改选区。                    |
+|                    | `Insert RTL Instance From File...`        | 选择 RTL 文件，在光标处插入例化。                                  |
+|                    | `Copy RTL Instance`                       | 当前或 Explorer 选中 RTL 的例化复制到剪贴板。                      |
+| **rtl_dummy**      | `Generate RTL Dummy...`                   | 选择 bbox/stub/port_swap，输出到源文件旁 `out/rtl_dummy/`。        |
+| **gen_tb**         | `Generate Empty TB Environment`           | 在 Terminal cwd 的 `out/sim/` 生成空 TB 环境。                     |
+|                    | `Generate TB From Current Filelist...`    | 选择 `.f`，输入 DUT top，输出到 filelist 旁 `out/sim/`。           |
+| **mem_tool**       | `Open Memory Tool Documentation`          | 以 HTML 预览 Memory Tool 文档。                                    |
+|                    | `Generate Memory Shell...`                | 输入 shell prefix，在 Terminal cwd 的 `out/mem_tool/` 生成 shell。 |
+|                    | `Integrate Memory From Excel`             | 选择 `.xlsx`，输入 shell prefix，集成 memory PHY。                 |
+| **csr_tool**       | `Open CSR Documentation`                  | 以 HTML 预览 CSR 文档。                                            |
+|                    | `Create CSR Template...`                  | 选择 Markdown/Excel 及是否包含 `base_info`，创建寄存器模板。       |
+|                    | `Create Default CSR Template`             | 直接创建仅含 `reg_define` 的 Markdown 模板。                       |
+|                    | `Generate CSR (Single)`                   | 当前 CSR Markdown/Excel 生成单模块，输出到输入旁 `out/`。          |
+|                    | `Generate CSR (Nested)`                   | 生成多层 CSR，输出到输入旁 `out/`，可打开寄存器树。                |
+|                    | `Open CSR Tree HTML`                      | 预览当前输入对应的 `out/doc/*_tree.html`。                         |
+|                    | `Insert CSR Register Row...`              | 只选择寄存器类型，插入默认行后自行编辑。                           |
+| **rtl_flist_mgr**  | `Set RTL Workspace Root...`               | 选择根目录、初始化标记并刷新 core 列表。                           |
+|                    | `Generate RTL Filelist...`                | 选择模式，刷新索引，输出到 core 旁 `out/flist/`。                  |
+|                    | `Refresh RTL Core List`                   | 在 RTL Cores 视图列出本体 core，不含 import；点击打开。            |
+| **git_repo_mgr**   | `Create Git Dependencies`                 | 在 Terminal cwd 创建并打开 `git_deps.toml`；已存在则直接打开。     |
+|                    | `Git Repository Status`                   | 显示分支/ref、commit、状态及异常明细；需先 sync。                  |
+|                    | `Sync Git Repositories...`                | 选择 full/shallow，确认后同步；保留已有 checkout。                 |
 
-`Generate Empty TB Environment` 和 `Generate Memory Shell...` 严格使用当前激活 Terminal 通过 Shell Integration 报告的 cwd。无法取得 cwd 时会提示先打开 Terminal，不会回退到 workspace 或当前文件目录。
+## 目录与使用约定
 
-`Generate TB From Current Filelist...` 与 `Integrate Memory From Excel` 均可从当前文件或 Explorer 右键文件调用。`mem_tool inst` 会询问 subsystem prefix：命令行 `-p` 控制 SRAM shell 命名，Excel 的 `prefix` 列继续控制 SRAM wrapper/PHY 的命名与匹配，两者语义独立。
+- **Terminal cwd**：Git 依赖模板、空 TB 和 Memory Shell 严格使用当前激活 Terminal 的 Shell Integration cwd；无法获取时提示停止，不回退到其他目录。
+- **CSR 模板**：优先 Terminal cwd，其次当前文件目录、workspace 根目录。Excel 使用 Office/WPS 打开以保留下拉菜单。
+- **Memory prefix**：输入的 prefix 控制 SRAM shell 命名；Excel 中的 prefix 控制 wrapper/PHY 命名，两者独立。
+- **RTL flist**：默认输出绝对路径，生成时刷新索引；文件名为 `<core_name>_<mode>.f`。
+- **Git 管理**：status、sync 查找 workspace。CLEAN 仅表示无本地改动，不代表远端最新；sync 不自动 pull 或切换已有 checkout 版本。graph、forall、switch、tag、快照及 admin/release 操作保留在 Terminal。
 
-## rtl_flist_mgr 与 git_repo_mgr
+## 更多资源
 
-`Generate RTL Filelist...` 固定使用绝对路径输出并自动执行 `--rescan`，避免刚修改的 corefile 被旧缓存遮住。生成文件固定为 `<core_dir>/out/flist/<core_name>_<mode>.f`。Explorer 的 `RTL Cores` 视图只展示 workspace 本体 core，符合 CLI `--list-core` 排除 `import/` 的约定。
+- **飞书文档**：[HW Tool 文档中心](https://my.feishu.cn/wiki/XwJPwteoEiu9hNkGCfkcvLaynGc)。
+- **命令行与发布**：[HW Tool CLI](https://github.com/damagebro/py_tools_for_hw/blob/main/hw_tool/README.md)、[发布说明](https://github.com/damagebro/py_tools_for_hw/blob/main/hw_tool/publish/README.md)。
+- **配套RTL库**：[com仓库][com-repo]提供Common IP、AXI/DMA和CSR bus模块，可与本工具集生成的RTL配套集成。
+- **配套文档**：[CSR bus][com-csr]、[工艺模板][com-impl]、[Common IP][com-common]。
 
-插件中的 `git_repo_mgr` 是受限入口，只开放 template、status 和 sync。`sync` 默认推荐完整 clone，也可选择 shallow clone；执行前必须确认。`graph`、`forall`、`export-flat`、`switch`、`tag` 以及全部 `admin/release` 命令不会注册到 VS Code，仍应在 Terminal 中显式执行。
+[com-csr]: https://github.com/damagebro/com/blob/main/doc/common_rtl_csr_manual.md
+[com-impl]: https://github.com/damagebro/com/blob/main/impl_template/README.md
+[com-common]: https://github.com/damagebro/com/blob/main/doc/common_rtl_manual.md
+[com-repo]: https://github.com/damagebro/com
 
-## 打包
 
-```bash
-npm run check
-npm run sync-snippets
-npm run sync-runtime
-npm run package
-```
+## 许可证
 
-`npm run package` 会自动完成上述三个准备步骤。产物为 `out/dmg-hw-tool-<version>.vsix`。安装后，VS Code 会自行管理用户扩展目录；插件约 1 MB，仅依赖系统 Python。打包使用仓库内的 `scripts/pack_vsix.py`，不依赖 `@vscode/vsce` 或网络访问。
+[MIT License](https://github.com/damagebro/py_tools_for_hw/blob/main/hw_tool/publish/vscode/LICENSE.md)：允许使用、修改、商用和再分发，需保留版权及许可声明。第三方组件遵循各自许可证。
