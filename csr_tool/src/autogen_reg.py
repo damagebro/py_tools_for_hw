@@ -55,6 +55,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Compatibility alias for --mode nested",
     )
+    parser.add_argument(
+        "--slv_ignore",
+        action="store_true",
+        help="Skip missing slave documents with a warning in nested mode",
+    )
     return parser
 
 
@@ -82,11 +87,12 @@ def build_template_argument_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def run(input_path: str, outdir: str, nested: bool) -> list[Path]:
+def run(input_path: str, outdir: str, nested: bool, slv_ignore: bool = False) -> list[Path]:
     source = Path(input_path).resolve()
     output = Path(outdir).resolve()
     module = CSRParser(
         str(source), nested=nested, repo_cache=str(output / ".csr_tool" / "repository"),
+        slv_ignore=slv_ignore,
     ).parse()
     generated: list[Path] = []
     generated.extend(
@@ -121,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_argument_parser().parse_args(actual_argv)
     nested = args.nested or args.mode == "nested"
     try:
-        generated = run(args.input, args.outdir, nested)
+        generated = run(args.input, args.outdir, nested, slv_ignore=args.slv_ignore)
     except (CSRValidationError, FileNotFoundError, ImportError, OSError) as exc:
         print(f"[ERROR] {exc}", file=sys.stderr)
         return 1

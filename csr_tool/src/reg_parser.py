@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from pathlib import Path
+import sys
 from typing import Any
-from .slave_source import SlaveSources, parse_base_sources
+from .slave_source import SlaveFileNotFoundError, SlaveSources, parse_base_sources
 
 from .models import (
     BaseInfoModel,
@@ -55,9 +56,10 @@ BASE_ALIASES = {
 
 
 class CSRParser:
-    def __init__(self, input_path: str, nested: bool = False, repo_cache: str | None = None):
+    def __init__(self, input_path: str, nested: bool = False, repo_cache: str | None = None, slv_ignore: bool = False):
         self.input_path = Path(input_path).resolve()
         self.nested = nested
+        self.slv_ignore = slv_ignore
         self._active_paths: list[Path] = []
         self._sources = SlaveSources(
             Path(repo_cache) if repo_cache else self.input_path.parent / ".csr_tool" / "repository",
@@ -545,7 +547,13 @@ class CSRParser:
         for reg in module.registers:
             if reg.reg_type != "slave":
                 continue
-            child_path = self._sources.resolve(reg.special.slv_filename, parent_path)
+            try:
+                child_path = self._sources.resolve(reg.special.slv_filename, parent_path)
+            except SlaveFileNotFoundError as exc:
+                if not self.slv_ignore:
+                    raise
+                print(f"[WARNING] {parent_path}: {reg.raw_name}: {exc}; skipping slave expansion (--slv_ignore)", file=sys.stderr)
+                continue
             if not child_path.exists():
                 raise FileNotFoundError(
                     f"{reg.raw_name}: slave file not found: {child_path}"

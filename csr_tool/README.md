@@ -190,6 +190,14 @@ slv_filename=sub_node.xlsx, bytesize=0x400
 
 先在当前引用文档的同目录查找；找到则直接使用，不获取其他来源。未找到时，递归搜索所有配置目录和 Git 仓库，按完整文件名（含扩展名）匹配。重复配置命中同一实际路径只计一份；多个不同路径有同名文件时列出匹配路径并报错，不按配置顺序任选一个。每个子节点都使用同样的规则，保留原有同目录使用方式。
 
+默认找不到 slave 文档时终止生成。可通过 `--slv_ignore` 跳过缺失文档的节点并输出警告，继续生成其余部分：
+
+```bash
+python src/autogen_reg.py -i input/top_reg.md --nested --slv_ignore -o out
+```
+
+该选项作用于所有递归层级，仅忽略完成搜索后仍未找到的文档。父模块的 slave 声明、地址窗口和接口保留，但不展开缺失节点及其子树，也不生成该子树的寄存器定义；输出并非完整系统描述。警告包含父文档、slave 名称和缺失文件名。仅有此类缺失且生成成功时返回码为 `0`。同名冲突、搜索目录不存在、Git 下载失败、文档解析错误、循环引用和地址越界仍报错；single 模式原本不加载子文档，不受此选项影响。旧输出不自动清理，建议使用新的输出目录，避免误用之前生成的子节点文件。
+
 在当前文档的 `base_info` 中填写搜索来源，多个来源填多行，同名 `item` 不会被覆盖：
 
 ```markdown
@@ -220,7 +228,7 @@ Excel 在 `base_info` sheet 中使用相同的多行写法。生成的单模块 
 
 仅 `--nested` 且同目录未找到时才搜索配置来源、获取 Git 文档。目标系统须安装 Git，并提前配置 SSH key 或 Git 凭据管理器，不要把密码、token 写入寄存器文档。每次生成需要 Git 搜索时重新解析远端 ref，不静默使用过期版本；同次解析的相同 URL/ref 只获取一次，每个搜索根目录只扫描一次。正式生成推荐指定 tag 或 commit ID。
 
-Git 获取结果按提交保存到 `out/.csr_tool/repository/`（随 `-o` 改变），不会修改开发者已有 checkout。直接调用 `CSRParser` 时同样读取文档的 `base_info`；默认缓存位于顶层输入文档旁的 `.csr_tool/repository/`，可通过 `repo_cache` 指定。缓存可在生成结束后删除，下次重新获取；暂不支持 Git submodule、Git LFS 实体下载及含符号链接的仓库。找不到文件、目录不存在、ref 不存在、获取失败、同名冲突、循环引用或地址空间越界时明确报错。
+Git 获取结果按提交保存到 `out/.csr_tool/repository/`（随 `-o` 改变），不会修改开发者已有 checkout。直接调用 `CSRParser` 时同样读取文档的 `base_info`；默认缓存位于顶层输入文档旁的 `.csr_tool/repository/`，可通过 `repo_cache` 指定。缓存可在生成结束后删除，下次重新获取；暂不支持 Git submodule、Git LFS 实体下载及含符号链接的仓库。默认找不到文件时明确报错，可用 `--slv_ignore` 忽略；目录不存在、ref 不存在、获取失败、同名冲突、循环引用或地址空间越界仍报错。
 
 ```bash
 python src/autogen_reg.py -i input/top_reg.md --nested -o out

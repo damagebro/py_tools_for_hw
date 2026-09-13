@@ -29,6 +29,55 @@ def slave(path, filename, rows=()):
 
 
 class SlaveSourceTests(unittest.TestCase):
+    def test_ignore_missing_recursive_slave_preserves_window_and_siblings(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            top = root / "top.md"
+            slave(top, "child.md")
+            child = root / "child.md"
+            child.write_text(HEADER +
+                "| 0 | missing | | | | | | slave | slv_filename=missing.md, bytesize=0x40 | |\n" +
+                "| 0x40 | found | | | | | | slave | slv_filename=leaf.md, bytesize=0x40 | |\n",
+                encoding="utf-8")
+            (root / "leaf.md").write_text(LEAF, encoding="utf-8")
+            with self.assertRaises(FileNotFoundError):
+                CSRParser(str(top), nested=True).parse()
+            warnings = io.StringIO()
+            with contextlib.redirect_stderr(warnings):
+                module = CSRParser(str(top), nested=True, slv_ignore=True).parse()
+            node = module.sub_modules[0].module_obj
+            self.assertEqual(len(node.registers), 2)
+            self.assertEqual(node.registers[0].special.bytesize, 0x40)
+            self.assertEqual([sub.instance_name for sub in node.sub_modules], ["found"])
+            self.assertIn("missing.md", warnings.getvalue())
+            self.assertIn(str(child), warnings.getvalue())
+            self.assertIn("[WARNING]", warnings.getvalue())
+            with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(["-i", str(top), "--nested", "--slv_ignore", "-o", str(root / "out")]), 0)
+            self.assertTrue(any((root / "out" / "rtl").glob("*.sv")))
+
+    def test_ignore_missing_does_not_hide_other_errors(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            top = root / "top.md"
+            slave(top, "missing.md", [("slave_dir", str(root / "absent"))])
+            with self.assertRaisesRegex(CSRValidationError, "directory not found"):
+                CSRParser(str(top), nested=True, slv_ignore=True).parse()
+            slave(top, "child.md", [("slave_dir", str(root / "library"))])
+            for name in ("a", "b"):
+                folder = root / "library" / name
+                folder.mkdir(parents=True)
+                (folder / "child.md").write_text(LEAF, encoding="utf-8")
+            with self.assertRaisesRegex(CSRValidationError, "ambiguous"):
+                CSRParser(str(top), nested=True, slv_ignore=True).parse()
+            slave(top, "child.md", [("slave_git", "url=https://example/repo.git")])
+            with patch.object(SlaveSources, "checkout", side_effect=CSRValidationError("Git slave download failed")):
+                with self.assertRaisesRegex(CSRValidationError, "download failed"):
+                    CSRParser(str(top), nested=True, slv_ignore=True).parse()
+            (root / "child.md").write_text("invalid document", encoding="utf-8")
+            with self.assertRaises(CSRValidationError):
+                CSRParser(str(top), nested=True, slv_ignore=True).parse()
+
     def test_local_search_priority_deduplication_and_ambiguity(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()

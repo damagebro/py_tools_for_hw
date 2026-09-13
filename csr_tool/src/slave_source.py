@@ -16,6 +16,10 @@ import zipfile
 from .reg_common import CSRValidationError
 
 
+class SlaveFileNotFoundError(FileNotFoundError):
+    """No matching document after successfully searching all configured sources."""
+
+
 def parse_base_sources(rows: list[tuple[str, object]], label: str) -> list[dict[str, str]]:
     sources = []
     for key, value in rows:
@@ -144,7 +148,7 @@ class SlaveSources:
                     self.index.setdefault(name, set()).update(paths)
         matches = sorted(self.index.get(filename, set()))
         if not matches:
-            raise FileNotFoundError(f"{parent.name}: slave file not found: {filename}; searched same directory and configured sources")
+            raise SlaveFileNotFoundError(f"{parent.name}: slave file not found: {filename}; searched same directory and configured sources")
         if len(matches) != 1:
             raise CSRValidationError(f"{parent.name}: ambiguous slave filename '{filename}':\n" + "\n".join(str(p) for p in matches))
         return matches[0]
