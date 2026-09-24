@@ -678,6 +678,9 @@ class ParserTests(unittest.TestCase):
             self.assertFalse((legacy_dir / "top_block_macros.h").exists())
 
             field = field_path.read_text(encoding="utf-8")
+            self.assertIn('#include "../common/c_legacy/leaf_a2_field_macros.h"', field)
+            self.assertNotIn("#define LEAF_A2_CONFIG_MODE_LSB", field)
+            field = (Path(temp) / "firmware/common/c_legacy/leaf_a2_field_macros.h").read_text(encoding="utf-8")
             self.assertIn("#define LEAF_A2_CONFIG_MODE_LSB        0U", field)
             self.assertIn("#define LEAF_A2_CONFIG_MODE_MSB        7U", field)
             self.assertIn("#define LEAF_A2_CONFIG_MODE_WIDTH      8U", field)
@@ -700,6 +703,7 @@ class ParserTests(unittest.TestCase):
             leaf_a2_defines = [
                 line for line in field.splitlines()
                 if line.startswith("#define LEAF_A2_")
+                and any(tag in line.split()[1] for tag in ("_LSB", "_MSB", "_WIDTH", "_MASK", "_GET(", "_SET("))
             ]
             self.assertEqual(
                 1,
@@ -770,6 +774,10 @@ class ParserTests(unittest.TestCase):
             types = (firmware_dir / "top_all_reg_type.h").read_text(
                 encoding="utf-8"
             )
+            self.assertNotIn("typedef union leaf_a2_", types)
+            self.assertIn('#include "common/leaf_a2_reg_addr.h"', addr)
+            self.assertIn('#include "common/leaf_a2_reg_type.h"', types)
+            types += (firmware_dir / "common/leaf_a2_reg_type.h").read_text(encoding="utf-8")
             self.assertIn(
                 "// -----------------------------------------------------------------------------\n"
                 "// top block\n"

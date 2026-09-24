@@ -260,6 +260,7 @@ class CSRParser:
             "system_baseaddr",
             "system_bytesize",
             "system_prefix",
+            "common",
             "author",
             "email",
             "slave_dir",
@@ -273,7 +274,11 @@ class CSRParser:
             raise CSRValidationError(
                 f"{path.name}: reg_bitwidth must be 8..64 and byte aligned"
             )
+        common = str(normalized.get("common", "false")).strip().lower()
+        if common not in {"true", "false"}:
+            raise CSRValidationError(f"{path.name}: common must be true or false")
         return BaseInfoModel(
+            common=common == "true",
             reg_bitwidth=bitwidth,
             system_baseaddr=parse_optional_int(
                 normalized.get("system_baseaddr", 0),

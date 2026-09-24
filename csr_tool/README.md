@@ -107,6 +107,7 @@ python src/autogen_reg.py -i input/xlsx/top_reg.xlsx --nested -o out
 | `system_baseaddr`   | 根模块系统基地址          |
 | `system_bytesize`   | 根模块地址空间大小        |
 | `system_prefix`     | Firmware 绝对地址宏前缀   |
+| `common`            | true/false，默认 false；仅当前 block 提取为共享 firmware 定义 |
 | `author`、`email`   | 文档元信息                |
 
 ### 3.2 reg_define
@@ -298,6 +299,25 @@ Firmware Header 仅在 nested 模式生成：
 | `c_legacy/<top>_field_macros.h` | C 兼容 field shift/mask/get/set 宏                                         |
 
 type header 不分配静态寄存器镜像存储空间，default 初始化函数只给调用方传入的 struct 赋值。`c_legacy/` 目录用于旧式 C field 宏兼容场景，block size/end 已合入 `all_reg_addr.h`。
+
+### 5.5 Common Block
+
+可复用的 block 在自身 `base_info` 中填写 `common = true`（Markdown 表格的 `common` 行填 `true`，Excel 同样填写）。不填写等价于 `false`，标记不传播到子模块。示例 `input/leaf_a2_reg.md` 已开启。
+
+```text
+out/firmware/
+├── common/
+│   ├── leaf_a2_reg_addr.h
+│   ├── leaf_a2_reg_type.h
+│   └── c_legacy/leaf_a2_field_macros.h
+├── top_all_reg_addr.h
+├── top_all_reg_type.h
+└── c_legacy/top_field_macros.h
+```
+
+- common 中的 `*_reg_addr.h` 保存 OFFSET、DEFAULT；`*_reg_type.h` 保存 union/struct 和默认值函数，并 include 对应地址头；`c_legacy/*_field_macros.h` 保存字段宏。均不含实例绝对地址或 subsys 前缀。
+- subsys 的地址、类型和 legacy 入口分别 include 对应 common 文件。重复实例只生成一套 common 定义，实例地址仍分别生成。
+- 未标记的 block 保持原有合并输出及命名。
 
 ## 6. RTL 集成说明
 

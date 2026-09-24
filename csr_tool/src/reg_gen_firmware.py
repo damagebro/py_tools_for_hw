@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from copy import deepcopy
 from pathlib import Path
 
 from .models import ModuleModel, RegisterModel
-from .reg_common import hex_width, write_text
+from .reg_common import CSRValidationError, hex_width, write_text
 
 
 InstanceNode = tuple[ModuleModel, int, tuple[str, ...], int, str]
@@ -17,6 +18,7 @@ def generate_firmware(
 ) -> list[Path]:
     if not is_nested:
         return []
+    common_headers = _common_headers(module)
     output = Path(out_dir)
     output.mkdir(parents=True, exist_ok=True)
     prefix = (module.base_info.system_prefix or module.name).lower()
@@ -25,26 +27,78 @@ def generate_firmware(
     legacy_dir = output / "c_legacy"
     field_path = legacy_dir / f"{module.name}_field_macros.h"
     stale_block_path = legacy_dir / f"{module.name}_block_macros.h"
+    common_paths = []
+    for filename, content in common_headers.items():
+        common_path = output / "common" / filename
+        write_text(common_path, content)
+        common_paths.append(common_path)
     write_text(addr_path, _address_header(module, prefix, addr_path.name))
     write_text(type_path, _type_header(module, addr_path.name, type_path.name))
     write_text(field_path, _legacy_field_header(module, field_path.name))
     if stale_block_path.exists():
         stale_block_path.unlink()
-    return [addr_path, type_path, field_path]
+    # Remove only the previous generated layout for the current module/blocks.
+    stale_paths = [output / f"{module.name}_common_manifest.json"]
+    stale_paths.extend(output / "common" / f"{b.name}_regs.h"
+                       for b, _, _ in module.walk() if b.base_info.common)
+    for stale in stale_paths:
+        if stale.is_file():
+            stale.unlink()
+    return [addr_path, type_path, field_path, *common_paths]
 
 
-def _address_header(module: ModuleModel, prefix: str, filename: str) -> str:
+def _common_includes(module: ModuleModel, kind: str, relative: str = "") -> list[str]:
+    names = sorted({b.name for b, _, _ in module.walk() if b.base_info.common})
+    directory = "c_legacy/" if kind == "field_macros" else ""
+    return [f'#include "{relative}common/{directory}{name}_{kind}.h"' for name in names]
+
+
+def _common_headers(module: ModuleModel) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    definitions: dict[str, dict[str, str]] = {}
+    source_paths: dict[str, str] = {}
+    for block, _, _ in module.walk():
+        if not block.base_info.common:
+            continue
+        # Only this block is shared; children and instance addresses stay outside.
+        local = deepcopy(block)
+        local.sub_modules = []
+        local.base_info.common = False
+        name = block.name
+        addr_name = f"{name}_reg_addr.h"
+        type_name = f"{name}_reg_type.h"
+        field_name = f"{name}_field_macros.h"
+        content = {
+            addr_name: _address_header(local, "", addr_name, addresses=False),
+            type_name: _type_header(local, addr_name, type_name),
+            f"c_legacy/{field_name}": _legacy_field_header(local, field_name),
+        }
+        key = name.upper()
+        if key in definitions and definitions[key] != content:
+            raise CSRValidationError(
+                f"Conflicting common block {name}: {source_paths[key]} vs {block.source_path}"
+            )
+        definitions[key] = content
+        source_paths[key] = block.source_path
+        headers.update(content)
+    return headers
+
+
+def _address_header(module: ModuleModel, prefix: str, filename: str, *, addresses: bool = True) -> str:
     guard = _guard(filename)
     nodes = list(module.walk())
     lines = [
         f"#ifndef {guard}",
         f"#define {guard}",
         "",
-        "// Generated register offsets and absolute addresses.",
+        "// Generated register offsets" + (" and absolute addresses." if addresses else " and defaults."),
+        *_common_includes(module, "reg_addr"),
         "",
     ]
     seen_sources: set[str] = set()
     for block, _, _ in nodes:
+        if block.base_info.common:
+            continue
         source = str(Path(block.source_path).resolve()).lower()
         if source in seen_sources:
             continue
@@ -74,8 +128,9 @@ def _address_header(module: ModuleModel, prefix: str, filename: str) -> str:
         lines.extend(_define_lines(defines))
         lines.append("")
 
-    lines.append("// Absolute address map")
-    for block, base, path, size, unique in _instance_nodes(module):
+    if addresses:
+        lines.append("// Absolute address map")
+    for block, base, path, size, unique in (_instance_nodes(module) if addresses else []):
         block_tag = f"{prefix}_{unique}".upper()
         lines.append(f"// {'/'.join(path)}")
         end_addr = base + max(1, size) - 1
@@ -116,13 +171,16 @@ def _type_header(module: ModuleModel, addr_filename: str, filename: str) -> str:
         f"#define {guard}",
         "",
         "#include <stdint.h>",
-        f'#include "{addr_filename}"',
+        f'#include "{addr_filename}"' if addr_filename else "",
+        *_common_includes(module, "reg_type"),
         "",
         "// Generated register type declarations. No storage is allocated.",
         "",
     ]
     seen_sources: set[str] = set()
     for block, _, _ in module.walk():
+        if block.base_info.common:
+            continue
         source = str(Path(block.source_path).resolve()).lower()
         if source in seen_sources:
             continue
@@ -198,10 +256,13 @@ def _legacy_field_header(module: ModuleModel, filename: str) -> str:
         f"#define {guard}",
         "",
         "// Legacy C-compatible field mask and shift macros.",
+        *_common_includes(module, "field_macros", "../"),
         "",
     ]
     seen_sources: set[str] = set()
     for block, _, _ in module.walk():
+        if block.base_info.common:
+            continue
         source = str(Path(block.source_path).resolve()).lower()
         if source in seen_sources:
             continue

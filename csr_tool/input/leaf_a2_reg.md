@@ -1,3 +1,9 @@
+# base_info
+
+| item   | type_input |
+| :----- | :--------- |
+| common | true       |
+
 # reg_define
 
 | offset | reg_name | field | msb | lsb | SW_access | default_value | reg_type | special | description |

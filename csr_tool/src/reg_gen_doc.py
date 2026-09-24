@@ -71,6 +71,8 @@ class DocGenerator:
             base_rows.append(["system_bytesize", f"0x{base.system_bytesize:X}", "-"])
         if base.system_prefix:
             base_rows.append(["system_prefix", base.system_prefix, "-"])
+        if base.common:
+            base_rows.append(["common", "true", "Shared firmware block definitions"])
         if base.author:
             base_rows.append(["author", base.author, "-"])
         if base.email:
@@ -304,6 +306,8 @@ class DocGenerator:
             base_sheet.append(["system_bytesize", f"0x{base.system_bytesize:X}", "-"])
         if base.system_prefix:
             base_sheet.append(["system_prefix", base.system_prefix, "-"])
+        if base.common:
+            base_sheet.append(["common", "true", "Shared firmware block definitions"])
         if base.author:
             base_sheet.append(["author", base.author, "-"])
         if base.email:

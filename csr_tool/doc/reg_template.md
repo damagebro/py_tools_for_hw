@@ -5,6 +5,7 @@
 | reg_bitwidth | 32                | -           |
 | system_addr  | 0xf0000000        | -           |
 | system_size  | 0x4000            | 16KiB       |
+| common       | false             | true 时仅当前 block 提取共享 firmware 定义 |
 | author       | dmg               | -           |
 | email        | dmg@sensetime.com | -           |
 
