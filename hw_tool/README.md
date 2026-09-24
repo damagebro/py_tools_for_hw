@@ -199,7 +199,7 @@ module unload hw_tool/0.1.0
 | --------------------------------- | ------------------------------------------------- |
 | `hw_tool --version`               | 显示当前 hub 的 Git tag/commit、提交日期时间与 dirty 状态 |
 | `hw_tool doctor`                  | 检查 Python、Git、PATH、注册项、依赖和子 group 状态 |
-| `hw_tool verify [group\|--all]`   | 快速检查各 group 的工具契约与注册完整性          |
+| `hw_tool verify [group or --all]` | 快速检查各 group 的工具契约与注册完整性          |
 | `hw_tool test --all`              | 发布前汇总执行各 group 的完整回归                |
 | `hw_tool list`                    | 列出已注册小组 hub 及其可用状态                    |
 | `hw_tool list --tools`            | 查询全部已就绪 group，列出全局工具索引             |
