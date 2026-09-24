@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import tomllib
 from urllib.parse import unquote, urlsplit
 from dataclasses import dataclass, field
@@ -52,6 +53,8 @@ class RepoMgrError(Exception):
 class Dependency:
     repository: str
     ref: str
+    local_path: str = ""
+    force_ref: bool = False
 
 
 @dataclass(frozen=True)
@@ -70,6 +73,8 @@ class RepositoryNode:
     checkout: str
     path: Path
     root: bool = False
+    local_path: str = ""
+    force_ref: bool = False
     requests: list[Request] = field(default_factory=list)
 
 
@@ -249,7 +254,11 @@ def parse_dependencies(data: dict[str, Any], path: Path) -> tuple[Dependency, ..
         ref = item.get("ref")
         if not isinstance(ref, str) or not ref.strip():
             raise RepoMgrError("E_MANIFEST", f"dependency requires ref: {path}")
-        result.append(Dependency(resolve_repository(item, remotes, path), ref.strip()))
+        local_path = item.get("local_path", "")
+        force_ref = item.get("force_ref", False)
+        if not isinstance(local_path, str) or not isinstance(force_ref, bool):
+            raise RepoMgrError("E_MANIFEST", f"local_path must be a string and force_ref a boolean: {path}")
+        result.append(Dependency(resolve_repository(item, remotes, path), ref.strip(), local_path.strip(), force_ref))
     return tuple(result)
 
 
@@ -361,12 +370,6 @@ def checkout_commit(path: Path, commit: str) -> str:
 
 
 def resolve_ref(path: Path, ref: str) -> str:
-    git_output(["fetch", "--tags", "origin"], path)
-    candidates = (ref, f"origin/{ref}", "FETCH_HEAD")
-    for candidate in candidates:
-        result = run_git(["rev-parse", "--verify", f"{candidate}^{{commit}}"], path)
-        if result.returncode == 0:
-            return result.stdout.strip()
     fetch_result = run_git(["fetch", "origin", ref], path)
     if fetch_result.returncode == 0:
         result = run_git(["rev-parse", "--verify", "FETCH_HEAD^{commit}"], path)
@@ -378,7 +381,32 @@ def resolve_ref(path: Path, ref: str) -> str:
     )
 
 
+def remote_manifest(repository: str, ref: str) -> tuple[str, dict[str, Any]]:
+    # A temporary bare repository keeps all fetches away from the local debug checkout.
+    with tempfile.TemporaryDirectory(prefix="git_repo_manifest_") as directory:
+        cache = Path(directory)
+        git_output(["init", "--bare"], cache)
+        git_output(["fetch", "--depth", "1", repository, ref], cache)
+        commit = git_output(["rev-parse", "FETCH_HEAD^{commit}"], cache)
+        if not git_output(["ls-tree", "--name-only", commit, "--", MANIFEST_NAME], cache):
+            return commit, {}
+        text = git_output(["show", f"{commit}:{MANIFEST_NAME}"], cache)
+        try:
+            return commit, tomllib.loads(text)
+        except tomllib.TOMLDecodeError as exc:
+            raise RepoMgrError("E_TOML", f"invalid remote manifest: {repository}@{ref}", (str(exc),)) from exc
+
+
+def reject_linked_operations(top: Path, state: dict[str, Any]) -> None:
+    for item in state["repositories"]:
+        path = top / item["checkout"]
+        if item.get("local_path") or path.is_symlink() or path.resolve() != path.absolute():
+            raise RepoMgrError("E_LOCAL_LINK", f"operation requires managed checkouts, not local links: {path}")
+
+
 def materialize_repository(path: Path, repository: str, ref: str, shallow: bool) -> str:
+    if path.resolve() != path.absolute():
+        raise RepoMgrError("E_LOCAL_LINK", f"refusing to update linked checkout: {path}")
     if path.exists():
         if not path.is_dir():
             raise RepoMgrError("E_CHECKOUT_PATH", f"checkout path is not a directory: {path}")
@@ -434,11 +462,36 @@ class WorkspaceResolver:
         self.checkout_names: dict[str, str] = {}
         self.root_key = ""
         self.overrides: dict[str, str] = {}
+        self.local_paths: dict[str, Path] = {}
+        self.forced_refs: dict[str, str] = {}
 
     def resolve(self) -> None:
         top_manifest_path = self.top / MANIFEST_NAME
         top_manifest = read_toml(top_manifest_path, MANIFEST_NAME)
         self.overrides = parse_checkout_overrides(top_manifest, top_manifest_path)
+        # Collect all top-level overrides before walking any indirect dependency.
+        for dep in parse_dependencies(top_manifest, top_manifest_path):
+            key = normalize_repository(dep.repository)
+            if dep.force_ref:
+                if key in self.forced_refs and self.forced_refs[key] != dep.ref:
+                    raise RepoMgrError("E_REF_CONFLICT", f"conflicting force_ref declarations: {dep.repository}")
+                self.forced_refs[key] = dep.ref
+            if dep.local_path:
+                target = Path(dep.local_path)
+                if not target.is_absolute():
+                    target = self.top / target
+                target = target.resolve()
+                if key in self.local_paths and self.local_paths[key] != target:
+                    raise RepoMgrError("E_LOCAL_PATH", f"conflicting local_path declarations: {dep.repository}")
+                if not target.is_dir() or not is_git_root(target):
+                    raise RepoMgrError("E_LOCAL_PATH", f"local_path must be a Git checkout root: {target}")
+                if normalize_repository(repository_origin(target)) != key:
+                    raise RepoMgrError("E_ORIGIN_CONFLICT", f"local_path origin differs from repository: {target}")
+                if target == self.top or target in self.top.parents or target.is_relative_to(self.top / "import"):
+                    raise RepoMgrError("E_LOCAL_PATH", f"unsafe local_path target: {target}")
+                self.local_paths[key] = target
+                path = self.top / "import" / self._checkout_name(key, dep.repository)
+                self._check_link(path, target)
 
         root_repository = repository_origin(self.top) if self.top_is_git else ""
         self.root_key = normalize_repository(root_repository) if self.top_is_git else f"workspace:{self.top.as_posix()}"
@@ -465,6 +518,7 @@ class WorkspaceResolver:
     ) -> None:
         for dependency in parse_dependencies(manifest, parent.path / MANIFEST_NAME):
             key = normalize_repository(dependency.repository)
+            effective_ref = self.forced_refs.get(key, dependency.ref)
             existing = self.nodes.get(key)
             target_name = existing.name if existing is not None else self._checkout_name(key, dependency.repository)
             request_chain = (*chain, target_name)
@@ -485,7 +539,7 @@ class WorkspaceResolver:
 
             if existing is not None:
                 previous = existing.requests[0]
-                if previous.ref != dependency.ref:
+                if existing.ref != effective_ref:
                     raise RepoMgrError(
                         "E_REF_CONFLICT",
                         "one repository requires multiple refs",
@@ -503,23 +557,46 @@ class WorkspaceResolver:
 
             checkout = self._checkout_name(key, dependency.repository)
             path = self.top / "import" / checkout
-            commit = materialize_repository(path, dependency.repository, dependency.ref, self.shallow)
+            local = self.local_paths.get(key)
+            if local is not None:
+                self._check_link(path, local)
+                commit, child_manifest = remote_manifest(dependency.repository, effective_ref)
+                if not path.is_symlink():
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    try:
+                        path.symlink_to(local, target_is_directory=True)
+                    except OSError as exc:
+                        raise RepoMgrError("E_LOCAL_LINK", f"cannot create directory symlink: {path}",
+                                           (str(exc), "Windows requires Developer Mode or symlink privileges.")) from exc
+            else:
+                commit = materialize_repository(path, dependency.repository, effective_ref, self.shallow)
+                child_manifest = read_toml(path / MANIFEST_NAME, MANIFEST_NAME, missing_ok=True)
             node = RepositoryNode(
                 key=key,
                 name=checkout,
                 repository=dependency.repository,
-                ref=dependency.ref,
+                ref=effective_ref,
                 commit=commit,
                 checkout=relative_checkout(self.top, path),
                 path=path,
+                local_path=str(local) if local is not None else "",
+                force_ref=key in self.forced_refs,
                 requests=[Request(dependency.ref, request_chain)],
             )
             self.nodes[key] = node
             self.node_order.append(key)
             self.checkout_names[checkout] = key
             self.edges.append((parent.key, key))
-            child_manifest = read_toml(path / MANIFEST_NAME, MANIFEST_NAME, missing_ok=True)
             self._walk(node, child_manifest, (*stack, key), request_chain)
+
+    def _check_link(self, path: Path, target: Path) -> None:
+        if path.parent.resolve() != path.parent.absolute():
+            raise RepoMgrError("E_LOCAL_LINK", f"import directory must not be a link: {path.parent}")
+        if path.is_symlink():
+            if not path.exists() or path.resolve() != target:
+                raise RepoMgrError("E_LOCAL_LINK", f"existing link has a different or missing target: {path}")
+        elif os.path.lexists(path):
+            raise RepoMgrError("E_LOCAL_LINK", f"checkout already exists; move it aside manually before linking: {path}")
 
     def _checkout_name(self, key: str, repository: str) -> str:
         name = self.overrides.get(key, repository_basename(repository))
@@ -561,6 +638,10 @@ class WorkspaceResolver:
                 node = self.nodes[child]
                 shared = child in visited
                 suffix = " [shared]" if shared else ""
+                if node.force_ref:
+                    suffix += f" [force_ref: requested={','.join(dict.fromkeys(r.ref for r in node.requests))} -> {node.ref}]"
+                if node.local_path:
+                    suffix += f" [local_path: {node.local_path}]"
                 lines.append(f"{prefix}{connector}{node.name}{suffix}")
                 if not shared:
                     visited.add(child)
@@ -583,6 +664,9 @@ class WorkspaceResolver:
                     "ref": node.ref,
                     "commit": node.commit,
                     "checkout": node.checkout,
+                    "local_path": node.local_path,
+                    "force_ref": node.force_ref,
+                    "requested_refs": list(dict.fromkeys(r.ref for r in node.requests)),
                 }
             )
         return {
@@ -608,6 +692,9 @@ class WorkspaceResolver:
                     "commit": self.nodes[key].commit,
                     "git_root": self.nodes[key].checkout,
                     "root": self.nodes[key].root,
+                    "local_path": self.nodes[key].local_path,
+                    "force_ref": self.nodes[key].force_ref,
+                    "requests": [{"ref": r.ref, "chain": list(r.chain)} for r in self.nodes[key].requests],
                 }
                 for key in self.node_order
             ],
@@ -638,6 +725,9 @@ def state_to_toml(state: dict[str, Any]) -> str:
                 f"ref = {toml_string(repository['ref'])}",
                 f"commit = {toml_string(repository['commit'])}",
                 f"checkout = {toml_string(repository['checkout'])}",
+                f"local_path = {toml_string(repository.get('local_path', ''))}",
+                f"force_ref = {str(repository.get('force_ref', False)).lower()}",
+                f"requested_refs = {json.dumps(repository.get('requested_refs', []))}",
                 "",
             )
         )
@@ -676,6 +766,7 @@ def load_resolved(top: Path) -> dict[str, Any]:
 
 
 def state_entries(top: Path, state: dict[str, Any]) -> list[tuple[str, Path]]:
+    reject_linked_operations(top, state)
     entries = [(str(state["workspace"]["top_name"]), top)] if state_top_is_git(top, state["workspace"]) else []
     for item in state["repositories"]:
         checkout = Path(str(item["checkout"]))
@@ -708,6 +799,9 @@ def state_records(top: Path, state: dict[str, Any]) -> list[dict[str, str | Path
                 "commit": str(item["commit"]),
                 "checkout": str(item["checkout"]),
                 "path": (top / str(item["checkout"])).resolve(),
+                "local_path": item.get("local_path", ""),
+                "force_ref": item.get("force_ref", False),
+                "requested_refs": item.get("requested_refs", []),
             }
         )
     return records
@@ -759,6 +853,7 @@ def command_sync(workspace_root_arg: str, shallow: bool) -> int:
 def command_export_flat(workspace_root_arg: str, output_arg: str) -> int:
     top = workspace_directory(Path(workspace_root_arg).resolve())
     state = load_resolved(top)
+    reject_linked_operations(top, state)
     output = Path(output_arg)
     if not output.is_absolute():
         output = top / output
@@ -801,6 +896,7 @@ def command_status(workspace_root_arg: str) -> int:
         name = top.name if record["checkout"] == "." else str(record["checkout"]).replace("\\", "/")
         branch, commit, status = "\u2014", "\u2014", "CLEAN"
         extra = []
+        logical_path = top / str(record["checkout"])
         if not path.is_dir():
             status = "MISSING"
             extra = [f"Expected: {record['repository']}", f"Ref: {record['ref']}",
@@ -808,6 +904,8 @@ def command_status(workspace_root_arg: str) -> int:
                      "CLI: git_repo_mgr sync"]
         else:
             try:
+                if record.get("local_path") and (not logical_path.is_symlink() or logical_path.resolve() != Path(str(record["local_path"]))):
+                    raise RepoMgrError("E_LOCAL_LINK", "local link no longer matches resolved state; run sync")
                 if not is_git_root(path):
                     raise RepoMgrError("E_GIT", "checkout is not a Git repository root")
                 head = repository_commit(path)
@@ -822,6 +920,11 @@ def command_status(workspace_root_arg: str) -> int:
             except RepoMgrError as exc:
                 status = "ERROR"
                 extra = [exc.message]
+        if record.get("force_ref"):
+            extra.append(f"force_ref: requested={','.join(record.get('requested_refs', []))} -> {record['ref']}")
+        if record.get("local_path"):
+            extra.append(f"local_path: {record['local_path']}")
+            extra.append(f"Integration ref: {record['ref']} {record['commit']} (source HEAD shown above)")
         rows.append((name, branch, commit, status))
         counts[status] += 1
         if extra:
@@ -868,6 +971,7 @@ def command_forall(
         )
     selected = set(projects)
     targets = [record for record in records if not selected or record["name"] in selected]
+    reject_linked_operations(top, {"repositories": targets})
     failures = 0
 
     for record in targets:
@@ -977,6 +1081,7 @@ def command_sync_flat(workspace_root_arg: str, flat_arg: str, shallow: bool) -> 
     top = workspace_directory(Path(workspace_root_arg).resolve())
     flat_path = Path(flat_arg).resolve()
     state = read_flat_snapshot(flat_path)
+    reject_linked_operations(top, state)
     workspace = state["workspace"]
     if state_top_is_git(top, workspace):
         if normalize_repository(repository_origin(top)) != normalize_repository(str(workspace["top_repository"])):
@@ -1003,6 +1108,7 @@ def command_sync_flat(workspace_root_arg: str, flat_arg: str, shallow: bool) -> 
 
 
 def admin_targets(top: Path, state: dict[str, Any]) -> list[RepositoryTarget]:
+    reject_linked_operations(top, state)
     result: list[RepositoryTarget] = []
     for record in state_records(top, state):
         path = record["path"]

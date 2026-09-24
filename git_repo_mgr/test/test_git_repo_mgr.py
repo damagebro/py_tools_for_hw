@@ -101,6 +101,110 @@ class GitRepoMgrTest(unittest.TestCase):
             f"ref = {json.dumps(ref)}\n"
         )
 
+    def test_force_ref_selects_forced_dependency_tree(self) -> None:
+        old = self.create_repo("old")
+        new = self.create_repo("new")
+        common = self.create_repo("common", self.dependency(old))
+        self.git(["tag", "v1"], common)
+        (common / "git_deps.toml").write_text(self.dependency(new), encoding="utf-8")
+        self.git(["commit", "-am", "new dependency"], common)
+        self.git(["tag", "v2"], common)
+        mid = self.create_repo("mid", self.dependency(common, "v1"))
+        top = self.prepare_top(self.dependency(mid) + self.dependency(common, "v2") + "force_ref = true\n")
+        resolver = mgr.WorkspaceResolver(top, False)
+        resolver.resolve()
+        mgr.write_workspace_state(top, resolver)
+        node = resolver.nodes[mgr.normalize_repository(str(common))]
+        self.assertEqual(node.ref, "v2")
+        self.assertEqual([r.ref for r in node.requests], ["v1", "v2"])
+        self.assertTrue((top / "import/new").is_dir())
+        self.assertFalse((top / "import/old").exists())
+        self.assertIn("requested=v1,v2 -> v2", resolver.tree_text())
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            mgr.command_status(str(top))
+        self.assertIn("requested=v1,v2 -> v2", output.getvalue())
+        # Removing the top override restores the ordinary version conflict.
+        (top / "git_deps.toml").write_text(self.dependency(mid) + self.dependency(common, "v2"), encoding="utf-8")
+        with self.assertRaises(mgr.RepoMgrError) as error:
+            mgr.WorkspaceResolver(top, False).resolve()
+        self.assertEqual(error.exception.code, "E_REF_CONFLICT")
+
+    def test_local_link_uses_remote_manifest_and_protects_target(self) -> None:
+        probe = self.work / "probe"
+        try:
+            probe.symlink_to(self.work, target_is_directory=True)
+        except OSError as exc:
+            if getattr(exc, "winerror", None) == 1314:
+                self.skipTest("Windows symlink privilege is not available")
+            raise
+        probe.unlink()
+        bottom = self.create_repo("bottom")
+        remote = self.create_repo("remote", self.dependency(bottom))
+        local = self.work / "debug"
+        self.git(["clone", str(remote), str(local)], self.work)
+        (local / "git_deps.toml").write_text("invalid TOML [", encoding="utf-8")
+        before = self.git(["rev-parse", "HEAD"], local)
+        mid = self.create_repo("mid", self.dependency(remote))
+        top = self.prepare_top(self.dependency(mid) + self.dependency(remote) + f"local_path = {json.dumps(str(local))}\n")
+        resolver = mgr.WorkspaceResolver(top, False)
+        resolver.resolve()
+        mgr.write_workspace_state(top, resolver)
+        link = top / "import/remote"
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(link.resolve(), local.resolve())
+        self.assertTrue((top / "import/bottom").is_dir())
+        mgr.WorkspaceResolver(top, False).resolve()
+        self.assertEqual(self.git(["rev-parse", "HEAD"], local), before)
+        self.assertEqual((local / "git_deps.toml").read_text(), "invalid TOML [")
+        with self.assertRaises(mgr.RepoMgrError):
+            mgr.command_switch(str(top), "main", False)
+        with self.assertRaises(mgr.RepoMgrError):
+            mgr.command_export_flat(str(top), "flat.toml")
+        with self.assertRaises(mgr.RepoMgrError):
+            mgr.command_forall(str(top), "git reset --hard", [], False, False)
+        link.unlink()
+        link.symlink_to(self.work / "missing", target_is_directory=True)
+        with self.assertRaises(mgr.RepoMgrError) as error:
+            mgr.WorkspaceResolver(top, False).resolve()
+        self.assertEqual(error.exception.code, "E_LOCAL_LINK")
+
+    def test_existing_checkout_is_not_replaced_by_link(self) -> None:
+        remote = self.create_repo("remote")
+        local = self.work / "debug"
+        self.git(["clone", str(remote), str(local)], self.work)
+        top = self.prepare_top(self.dependency(remote))
+        mgr.WorkspaceResolver(top, False).resolve()
+        existing = top / "import/remote"
+        (existing / "keep.txt").write_text("untracked", encoding="utf-8")
+        first = self.create_repo("first")
+        (top / "git_deps.toml").write_text(self.dependency(first) + self.dependency(remote) + f"local_path = {json.dumps(str(local))}\n", encoding="utf-8")
+        with self.assertRaises(mgr.RepoMgrError) as error:
+            mgr.WorkspaceResolver(top, False).resolve()
+        self.assertEqual(error.exception.code, "E_LOCAL_LINK")
+        self.assertFalse((top / "import/first").exists())
+        self.assertEqual((existing / "keep.txt").read_text(), "untracked")
+
+    def test_remote_manifest_reads_commit_not_worktree(self) -> None:
+        bottom = self.create_repo("bottom")
+        remote = self.create_repo("remote", self.dependency(bottom))
+        before = self.git(["rev-parse", "HEAD"], remote)
+        (remote / "git_deps.toml").write_text("broken [", encoding="utf-8")
+        commit, manifest = mgr.remote_manifest(str(remote), "main")
+        self.assertEqual(commit, before)
+        self.assertEqual(manifest["dependency"][0]["repository"], str(bottom))
+        with self.assertRaises(mgr.RepoMgrError):
+            mgr.remote_manifest(str(remote), "missing_ref")
+
+    def test_invalid_overrides_and_conflicting_force_refs(self) -> None:
+        with self.assertRaises(mgr.RepoMgrError):
+            mgr.parse_dependencies({"dependency": [{"repository": "https://example.com/a.git", "ref": "main", "force_ref": "true"}]}, Path("git_deps.toml"))
+        remote = self.create_repo("remote")
+        top = self.prepare_top(self.dependency(remote, "v1") + "force_ref = true\n" + self.dependency(remote, "v2") + "force_ref = true\n")
+        with self.assertRaises(mgr.RepoMgrError) as error:
+            mgr.WorkspaceResolver(top, False).resolve()
+        self.assertEqual(error.exception.code, "E_REF_CONFLICT")
+        self.assertFalse((top / "import").exists())
+
     def test_workspace_discovery_priority_and_ambiguity(self) -> None:
         # Bound discovery to this temporary hierarchy, independent of outer repos.
         root = self.work / "project"

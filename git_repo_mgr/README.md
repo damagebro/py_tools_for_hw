@@ -94,6 +94,32 @@ http://git.example.com/dmg/common_ip/
 
 不同 host 不会自动合并，即使仓库路径相同也会视为不同 repository。对于本地路径和 `file://` URL，工具按解析后的真实绝对路径去重。
 
+### 本地替换与强制版本
+
+仅在 workspace_root 的 `[[dependency]]` 配置以下选项；子仓库中的 `local_path`、`force_ref` 不生效。
+
+```toml
+[[dependency]]
+repository = "https://example.com/project/mid_a.git"
+ref = "main"
+local_path = "C:/work/mid_a"
+
+# 间接依赖也可在顶层补充声明，覆盖所有引用，不受条目顺序影响。
+[[dependency]]
+repository = "https://example.com/project/bottom_common.git"
+ref = "v2.0.0"
+force_ref = true
+# local_path = "C:/work/bottom_common"
+```
+
+- `local_path` 未填或为空时正常 clone；非空时在 `import/<name>` 创建目录软链接。相对路径基于 workspace_root，目标必须为 Git 仓库根目录，origin 与 repository 归一化后一致。
+- 本地允许 dirty、HEAD 与集成版本不同。工具仍从 URL + 有效 ref 获取清单、递归解析子依赖，不读取本地清单或本地 import，不修改链接目标。
+- 已有普通 checkout 时拒绝替换，请自行移走并保留需要的内容。同目标软链接复用；不同目标或失效链接报错，不自动删除。Windows 创建软链接需要开发者模式或相应权限。
+- `force_ref = true` 使用该条目的 ref 覆盖所有版本请求，并解析覆盖后版本的子依赖；默认 false，版本冲突仍报错。tree/status 显示原请求与最终 ref，兼容性由集成者确认。
+- 为保护调试仓库，包含本地链接时暂不支持批量 switch/tag/admin、flat 导出或恢复；`forall` 选中链接时也报错，可按名称仅选择普通 checkout。删除 `local_path` 后，需手动移除链接再 sync，工具不会沿链接 clone 或 checkout。
+
+两项可独立或组合使用：`force_ref` 决定集成版本和依赖来源，`local_path` 只替换源码位置。它们不自动消除目录重名或循环依赖。
+
 ## Workspace 与冲突
 
 ### 定位 workspace
@@ -210,18 +236,18 @@ gitlab_allowed_to_unprotect = [{ access_level = 40 }]
 
 `integration-only` 只允许配置中的 release 用户、团队或 app 修改 `main`；GitLab 必须显式给出 `gitlab_allowed_to_push`。`read-only` 则禁止全部直接 push/merge，适合短时冻结。无 token 或 API 权限不足时，管理员命令直接失败。
 
-| command                                    | 用途                                                                    |
-| ------------------------------------------ | ----------------------------------------------------------------------- |
-| `admin policy-status`                      | 显示各仓库默认分支的 provider、当前 token 身份与保护状态                |
-| `admin policy-diff`                        | 比较默认分支实际策略与 `baseline_mode`，发现人工策略漂移                |
-| `admin policy-apply [--dry-run]`           | 对默认分支应用日常 baseline 策略                                        |
-| `admin protect <branch> [--mode read-only\ | integration-only]`                                                      | 先确认全部 `origin/<branch>` 存在，再批量建立指定分支保护 |
-| `admin unprotect <branch>`                 | 先确认全部 `origin/<branch>` 存在，再批量删除指定分支保护               |
-| `admin lock-main [--mode read-only\        | integration-only]`                                                      | 保存原始策略后，批量临时锁定默认分支                      |
-| `admin unlock-main <lock_id>`              | 按保存的原始 API 策略精确恢复                                           |
-| `admin release <tag> [--push]`             | 校验 clean、受保护默认分支、`HEAD == origin/<branch>`，保存快照并打 tag |
-| `admin release-resume <tag>`               | 按 release 状态继续未完成 tag/push；默认分支或 commit 变化时停止        |
-| `admin audit`                              | 输出本地管理员操作审计记录                                              |
+| command                                                         | 用途                                                                    |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `admin policy-status`                                           | 显示各仓库默认分支的 provider、当前 token 身份与保护状态                |
+| `admin policy-diff`                                             | 比较默认分支实际策略与 `baseline_mode`，发现人工策略漂移                |
+| `admin policy-apply [--dry-run]`                                | 对默认分支应用日常 baseline 策略                                        |
+| `admin protect <branch> [--mode read-only or integration-only]` | 先确认全部 `origin/<branch>` 存在，再批量建立指定分支保护               |
+| `admin unprotect <branch>`                                      | 先确认全部 `origin/<branch>` 存在，再批量删除指定分支保护               |
+| `admin lock-main [--mode read-only or integration-only]`        | 保存原始策略后，批量临时锁定默认分支                                    |
+| `admin unlock-main <lock_id>`                                   | 按保存的原始 API 策略精确恢复                                           |
+| `admin release <tag> [--push]`                                  | 校验 clean、受保护默认分支、`HEAD == origin/<branch>`，保存快照并打 tag |
+| `admin release-resume <tag>`                                    | 按 release 状态继续未完成 tag/push；默认分支或 commit 变化时停止        |
+| `admin audit`                                                   | 输出本地管理员操作审计记录                                              |
 
 示例：
 
