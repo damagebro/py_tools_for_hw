@@ -27,7 +27,115 @@ def generate_rtl(module: ModuleModel, out_dir: str) -> list[Path]:
         write_text(wrapper_path, _wrapper_rtl(item))
         write_text(template_path, _integration_template(item))
         generated.extend([main_path, typedef_path, wrapper_path, template_path])
+        if item.base_info.protocol in {"apb3", "apb4"}:
+            apb_path = output / f"{item.name}_apb.sv"
+            write_text(apb_path, _apb_rtl(item))
+            generated.append(apb_path)
     return generated
+
+
+def _apb_rtl(module: ModuleModel) -> str:
+    apb4 = module.base_info.protocol == "apb4"
+    csr_signals = {
+        "i_csr_req_write": "w_csr_req_write",
+        "i_csr_req_addr": "w_csr_req_addr",
+        "i_csr_req_wdata": "w_csr_req_wdata",
+        "i_csr_req_wstrb": "w_csr_req_wstrb",
+        "i_csr_req_valid": "w_csr_req_valid",
+        "o_csr_req_ready": "w_csr_req_ready",
+        "o_csr_rsp_rdata": "w_csr_rsp_rdata",
+        "o_csr_rsp_rvalid": "w_csr_rsp_rvalid",
+    }
+    ports = []
+    connections = []
+    for declaration in _main_ports(module):
+        if not declaration:
+            continue
+        name = declaration.partition(" // ")[0].split()[-1]
+        connections.append(f"    .{name} ({csr_signals.get(name, name)})")
+        if name not in csr_signals:
+            ports.append(declaration)
+    ports.extend([
+        "input wire [CSR_AW-1:0] i_apb_paddr",
+        "input wire i_apb_psel",
+        "input wire i_apb_penable",
+        "input wire i_apb_pwrite",
+        "input wire [CSR_DW-1:0] i_apb_pwdata",
+        "output wire o_apb_pready",
+        "output wire [CSR_DW-1:0] o_apb_prdata",
+        "output wire o_apb_pslverr",
+    ])
+    if apb4:
+        ports.extend([
+            "input wire [CSR_DW/8-1:0] i_apb_pstrb",
+            "input wire [2:0] i_apb_pprot // Accepted without protection filtering",
+        ])
+    header = [
+        f"// Generated {module.base_info.protocol.upper()} wrapper. Internal slave ports remain CSR.",
+        f"module {module.name}_apb #(",
+        "    parameter CSR_AW = 32,",
+        f"    parameter CSR_DW = {module.base_info.reg_bitwidth}",
+        ") (", *_format_ports(ports), ");",
+    ]
+    strobe = "i_apb_pstrb" if apb4 else "{CSR_DW/8{1'b1}}"
+    body = f"""
+//signal declare-------------------------------------------------------------
+reg r_req_sent;
+reg r_rsp_vld;
+reg [CSR_DW-1:0] r_rsp_data;
+wire w_apb_access;
+wire w_apb_done;
+wire w_csr_req_hs;
+wire w_read_rsp;
+wire w_csr_req_write;
+wire [CSR_AW-1:0] w_csr_req_addr;
+wire [CSR_DW-1:0] w_csr_req_wdata;
+wire [CSR_DW/8-1:0] w_csr_req_wstrb;
+wire w_csr_req_valid;
+wire w_csr_req_ready;
+wire [CSR_DW-1:0] w_csr_rsp_rdata;
+wire w_csr_rsp_rvalid;
+//statement------------------------------------------------------------------
+assign w_apb_access = i_apb_psel && i_apb_penable && rst_n && !clear;
+assign w_csr_req_write = i_apb_pwrite;
+assign w_csr_req_addr = i_apb_paddr;
+assign w_csr_req_wdata = i_apb_pwdata;
+assign w_csr_req_wstrb = {strobe};
+assign w_csr_req_valid = w_apb_access && !r_req_sent;
+assign w_csr_req_hs = w_csr_req_valid && w_csr_req_ready;
+// Accept only the response belonging to this read, including same-cycle responses.
+assign w_read_rsp = w_apb_access && !i_apb_pwrite &&
+                    (r_req_sent || w_csr_req_hs) && w_csr_rsp_rvalid;
+assign o_apb_pready = w_apb_access && (i_apb_pwrite ?
+                      w_csr_req_hs : (r_rsp_vld || w_read_rsp));
+assign o_apb_prdata = r_rsp_vld ? r_rsp_data : w_csr_rsp_rdata;
+assign o_apb_pslverr = 1'b0;
+assign w_apb_done = w_apb_access && o_apb_pready;
+
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+        r_req_sent <= 1'b0;
+        r_rsp_vld <= 1'b0;
+        r_rsp_data <= '0;
+    end else if (clear || w_apb_done) begin
+        r_req_sent <= 1'b0;
+        r_rsp_vld <= 1'b0;
+    end else begin
+        if (w_csr_req_hs)
+            r_req_sent <= 1'b1;
+        if (w_read_rsp) begin
+            r_rsp_vld <= 1'b1;
+            r_rsp_data <= w_csr_rsp_rdata;
+        end
+    end
+end
+//instance-------------------------------------------------------------------
+{module.name} #(
+    .CSR_AW (CSR_AW),
+    .CSR_DW (CSR_DW)
+) u_{module.name} (
+"""
+    return "\n".join(header) + "\n" + body + ",\n".join(connections) + "\n);\nendmodule\n"
 
 
 def _main_rtl(module: ModuleModel) -> str:

@@ -6,6 +6,7 @@
 | system_bytesize | 0x1_0000          |
 | system_prefix   | npu               |
 | reg_bitwidth    | 32                |
+| protocol        | apb3              |
 | author          | dmg               |
 | email           | dmg@sensetime.com |
 

@@ -261,6 +261,7 @@ class CSRParser:
             "system_bytesize",
             "system_prefix",
             "common",
+            "protocol",
             "author",
             "email",
             "slave_dir",
@@ -277,7 +278,13 @@ class CSRParser:
         common = str(normalized.get("common", "false")).strip().lower()
         if common not in {"true", "false"}:
             raise CSRValidationError(f"{path.name}: common must be true or false")
+        protocol = str(normalized.get("protocol", "")).strip().lower()
+        if protocol not in {"apb3", "apb4"}:
+            protocol = "csr_bus"
+        if protocol != "csr_bus" and bitwidth not in {8, 16, 32}:
+            raise CSRValidationError(f"{path.name}: APB reg_bitwidth must be 8, 16 or 32")
         return BaseInfoModel(
+            protocol=protocol,
             common=common == "true",
             reg_bitwidth=bitwidth,
             system_baseaddr=parse_optional_int(

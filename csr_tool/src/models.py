@@ -16,6 +16,7 @@ class BaseInfoModel:
     extras: dict[str, str] = field(default_factory=dict)
     slave_sources: list[dict[str, str]] = field(default_factory=list)
     common: bool = False
+    protocol: str = "csr_bus"
 
 
 @dataclass

@@ -353,6 +353,22 @@ autogen RTL 接收到的 CSR bus 信号：
 
 可编辑时序源文件：[`doc/assets/csr_bus_timing.json`](doc/assets/csr_bus_timing.json)
 
+### APB 可选封装
+
+在输入 Markdown 的 `base_info` 表或 Excel 同名工作表中增加：
+
+| item     | type_input |
+| -------- | ---------- |
+| protocol | apb3       |
+
+`apb3`、`apb4` 忽略大小写和首尾空格；不填、空值或其他值均保持 `csr_bus`。选择 APB 时，增量生成 `rtl/<module>_apb.sv`，内部直接生成转换逻辑并例化原有 `<module>`，不依赖外部 bridge 或 COM 宏。原 CSR 文件及其他输出保持可用；两种入口任选其一，不要同时例化成两套寄存器。
+
+APB3 写 strobe 全 1；APB4 使用 `PSTRB`，接收 `PPROT` 但不做权限过滤。`PSLVERR` 固定为 0，空洞读沿用 CSR 行为；支持 8/16/32 位数据宽度，同步时钟，不实现超时或跨时钟转换。参数覆盖时也应保持该宽度范围。
+
+配置只作用于当前节点，不向子节点继承；nested 内部仍连接 CSR。`input/top_reg.md` 展示 APB3 顶层封装。现有自动 TB 仍测试原 CSR 核心，不自动改为 APB 激励。
+
+`clear` 会中止封装中的事务，必须与核心及下游读响应路径一起清空，并由 APB master 同步撤销/重新开始事务；不支持仅清空封装后仍返回旧响应。
+
 ### 6.2 autogen RTL 与 user RTL 的 DFF 边界
 
 - `cfg`：DFF 位于 autogen RTL，硬件通过 `o_cfg_*` 读取。

@@ -36,6 +36,34 @@ tempfile.TemporaryDirectory = WorkspaceTemporaryDirectory
 
 
 class ParserTests(unittest.TestCase):
+    def test_apb_protocol_wrapper(self) -> None:
+        from src.reg_gen_rtl import generate_rtl, _main_rtl
+        parser = CSRParser(str(ROOT / "input" / "top_reg.md"), nested=True)
+        module = parser.parse()
+        self.assertEqual(module.base_info.protocol, "apb3")
+        self.assertTrue(all(child.base_info.protocol == "csr_bus" for child, _, _ in module.walk() if child is not module))
+        original = _main_rtl(module)
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            paths = generate_rtl(module, directory)
+            wrapper = output / f"{module.name}_apb.sv"
+            self.assertIn(wrapper, paths)
+            apb3 = wrapper.read_text()
+            self.assertNotIn("i_apb_pstrb", apb3)
+            self.assertNotIn("i_apb_pprot", apb3)
+            self.assertNotIn("com_csr", apb3)
+            self.assertIn("w_csr_req_valid = w_apb_access && !r_req_sent", apb3)
+            self.assertIn(".o_tx_csr_req_valid (o_tx_csr_req_valid)", apb3)
+            module.base_info.protocol = "apb4"
+            generate_rtl(module, directory)
+            apb4 = wrapper.read_text()
+            self.assertIn("w_csr_req_wstrb = i_apb_pstrb", apb4)
+            self.assertIn("i_apb_pprot", apb4)
+            self.assertEqual(original, _main_rtl(module))
+        for value, expected in [(" APB3 ", "apb3"), ("ApB4", "apb4"), ("", "csr_bus"), ("axi", "csr_bus")]:
+            self.assertEqual(parser._parse_base_info([("protocol", value)], Path("test.md")).protocol, expected)
+        self.assertEqual(parser._parse_base_info([], Path("test.md")).protocol, "csr_bus")
+
     def test_template_command_generates_markdown_and_excel(self) -> None:
         try:
             import openpyxl
