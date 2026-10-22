@@ -102,15 +102,45 @@ class SlaveSourceTests(unittest.TestCase):
             with self.assertRaisesRegex(FileNotFoundError, "slave file not found"):
                 parser.parse()
 
-    def test_filename_only_and_special_no_longer_contains_git(self):
-        for filename in ("../child.md", "/tmp/a.md", "C:/a.xlsx", "doc\\a.md", "bad.txt"):
+    def test_filename_or_relative_path_and_special_no_longer_contains_git(self):
+        for filename in ("/tmp/a.md", "C:/a.xlsx", "bad.txt", "\\\\server\\a.md"):
             with self.assertRaises(CSRValidationError):
                 SlaveSources.validate_filename(filename)
-        for name in ("a.md", "child.xlsx"):
+        for name in ("a.md", "child.xlsx", "../child.md", "doc\\a.md"):
             SlaveSources.validate_filename(name)
         with self.assertRaisesRegex(CSRValidationError, "unsupported special"):
             CSRParser("top.md")._validate_special("sub", "slave", parse_special(
                 "slv_filename=child.md, git_url=https://example/repo.git", "slave"))
+
+    def test_relative_slave_and_mem_address_map(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            child = root / "child.md"
+            child.write_text(HEADER + "| 0x20 | ram | | | | | | mem | bytesize=0x40 | SRAM |\n", encoding="utf-8")
+            top = root / "doc" / "top.md"
+            slave(top, "../child.md", [("system_baseaddr", "0x1000")])
+            module = CSRParser(str(top), nested=True).parse()
+            docs = DocGenerator(module, str(root / "out"))
+            self.assertIn("0x1020 ~ 0x105F", docs.tree_markdown())
+            self.assertIn("ram (mem)", docs.tree_html())
+            self.assertEqual(len(module.sub_modules), 1)
+            self.assertEqual(module.sub_modules[0].module_obj.registers[0].offset, 0x20)
+            import openpyxl
+            docs.out_dir.mkdir(parents=True)
+            book = openpyxl.load_workbook(docs._write_tree_excel())
+            try:
+                rows = list(book["address_map"].values)
+                self.assertTrue(any("ram (mem)" in str(row[0]) and row[1] == "0x1020 ~ 0x105F" for row in rows))
+            finally:
+                book.close()
+            # A missing explicit path must not resolve to a same-name search hit.
+            slave(top, "missing/child.md", [("slave_dir", str(root))])
+            with self.assertRaisesRegex(FileNotFoundError, "relative path not found"):
+                CSRParser(str(top), nested=True).parse()
+            sources = SlaveSources(root / "cache", [])
+            sources.repositories["fixture"] = top.parent
+            with self.assertRaisesRegex(CSRValidationError, "escapes"):
+                sources.resolve("../child.md", top)
 
     def test_git_row_attributes_and_validation(self):
         rows = [("slave_git", " ref = v1 , path = doc/csr , url = https://example/repo.git"),

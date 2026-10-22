@@ -604,8 +604,8 @@ class ParserTests(unittest.TestCase):
             self.assertNotIn(">msb<", page)
             self.assertNotIn(">lsb<", page)
             self.assertIn(">[31:0]<", page)
-            self.assertEqual(page.count('<col style="width:20ch">'), 3 * 25)
-            self.assertEqual(page.count('<col style="width:60ch">'), 25)
+            self.assertEqual(page.count('<col style="width:20ch">'), 3 * 26)
+            self.assertEqual(page.count('<col style="width:60ch">'), 26)
             self.assertIn('<aside class="sidebar">', page)
             self.assertIn('class="page-shell sidebar-collapsed"', page)
             self.assertIn('data-testid="sidebar-toggle"', page)
@@ -628,7 +628,7 @@ class ParserTests(unittest.TestCase):
                 page,
             )
             self.assertIn(
-                '<summary class="nav-module">1.2.1 leaf_a2_u2</summary>',
+                '<summary class="nav-module">1.2.2 leaf_a2_u2</summary>',
                 page,
             )
             self.assertNotIn("1.1 top/mid_a", page)
@@ -683,7 +683,8 @@ class ParserTests(unittest.TestCase):
             self.assertIn("| 1 top", tree)
             self.assertIn("| 1.1 mid_a", tree)
             self.assertIn("| 1.1.2 leaf_a2_u1", tree)
-            self.assertIn("| 1.2.1 leaf_a2_u2", tree)
+            self.assertIn("| 1.2.1 b_mem (mem)", tree)
+            self.assertIn("| 1.2.2 leaf_a2_u2", tree)
             self.assertNotIn("top/mid_a", tree)
             self.assertNotIn("Base address:", tree)
             self.assertNotIn("Source:", tree)
@@ -867,9 +868,10 @@ class ParserTests(unittest.TestCase):
                 self.assertEqual(address_rows[2][0], "1.1 mid_a")
                 self.assertNotIn("top/mid_a", address_rows[2])
                 self.assertEqual(address_rows[4][0], "1.1.2 leaf_a2_u1")
-                self.assertEqual(address_rows[6][0], "1.2.1 leaf_a2_u2")
+                self.assertEqual(address_rows[6][0], "1.2.1 b_mem (mem)")
+                self.assertEqual(address_rows[7][0], "1.2.2 leaf_a2_u2")
                 self.assertIn("1_1_2_leaf_a2_u1", workbook.sheetnames)
-                self.assertIn("1_2_1_leaf_a2_u2", workbook.sheetnames)
+                self.assertIn("1_2_2_leaf_a2_u2", workbook.sheetnames)
 
                 mid_rows = [
                     tuple(cell.value for cell in row)

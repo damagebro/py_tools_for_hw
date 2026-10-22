@@ -145,7 +145,7 @@ python src/autogen_reg.py -i input/xlsx/top_reg.xlsx --nested -o out
 
 多个属性使用逗号分隔：
 
-- `slv_filename=xxx.md`：`slave` 引用的子模块定义，只填 `.md` 或 `.xlsx` 文件名，不填路径或 URL；搜索来源统一填写在 `base_info`。
+- `slv_filename=xxx.md`：`slave` 引用的子模块定义，支持 `.md` 或 `.xlsx` 文件名，以及相对当前文档目录的路径；不接受绝对路径或 URL。额外搜索来源填写在 `base_info`。
 - `bytesize=0x...`：`slave` 或 `mem` 占用的地址空间。
 - `repeat N`：连续生成 N 个寄存器实例。
 - `shadow` / `shadow 1`：一份 shadow 和一份 working 配置。
@@ -187,9 +187,14 @@ nested 从顶层文件开始，递归解析每个 `slave` 的 `slv_filename`：
 ```text
 slv_filename=sub_node.md, bytesize=0x400
 slv_filename=sub_node.xlsx, bytesize=0x400
+slv_filename=../cpu/reg_define.md, bytesize=0x400
 ```
 
-先在当前引用文档的同目录查找；找到则直接使用，不获取其他来源。未找到时，递归搜索所有配置目录和 Git 仓库，按完整文件名（含扩展名）匹配。重复配置命中同一实际路径只计一份；多个不同路径有同名文件时列出匹配路径并报错，不按配置顺序任选一个。每个子节点都使用同样的规则，保留原有同目录使用方式。
+仅填文件名时，先在当前引用文档的同目录查找；找到则直接使用，不获取其他来源。未找到时，递归搜索所有配置目录和 Git 仓库，按完整文件名（含扩展名）匹配。重复配置命中同一实际路径只计一份；多个不同路径有同名文件时列出匹配路径并报错，不按配置顺序任选一个。
+
+填写相对路径时，支持 `./`、`../`、子目录及正反斜杠，基于当前引用文档所在目录解析，与运行目录无关。指定路径缺失时不再回退到文件名搜索；`--slv_ignore` 仍可跳过缺失节点。下载仓库中的文档引用不能越出该仓库。
+
+`reg_type=mem` 在 nested 输出的 Markdown、HTML 和 Excel Address Map 中作为 `(mem)` 叶节点展示；起始地址累加父层地址与 offset，结束地址为起始地址加 bytesize 减 1。不需要子文档，不改变 RTL 或 firmware 的模块结构。
 
 默认找不到 slave 文档时终止生成。可通过 `--slv_ignore` 跳过缺失文档的节点并输出警告，继续生成其余部分：
 

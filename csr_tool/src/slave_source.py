@@ -103,19 +103,27 @@ class SlaveSources:
 
     @staticmethod
     def validate_filename(filename: str):
-        if not filename or any(c in filename for c in "/\\:") or filename in {".", ".."}:
-            raise CSRValidationError("slv_filename must contain only a filename; configure slave_dir/slave_git in base_info")
+        normalized = filename.replace("\\", "/")
+        if (not filename or ":" in filename or PurePosixPath(normalized).is_absolute()
+                or PureWindowsPath(filename).drive or normalized in {".", ".."}):
+            raise CSRValidationError("slv_filename must be a filename or relative path; configure absolute sources in base_info")
         if Path(filename).suffix.lower() not in {".md", ".xlsx"}:
             raise CSRValidationError("slv_filename must be an .md or .xlsx filename")
 
     def resolve(self, filename: str, parent: Path) -> Path:
         self.validate_filename(filename)
-        direct = (parent.parent / filename).resolve()
+        relative = filename.replace("\\", "/")
+        direct = (parent.parent / relative).resolve()
+        for root in self.repositories.values():
+            if parent.resolve().is_relative_to(root) and not direct.is_relative_to(root):
+                raise CSRValidationError("Slave file escapes downloaded repository")
         if direct.is_file():
             for root in self.repositories.values():
                 if parent.is_relative_to(root) and not direct.is_relative_to(root):
                     raise CSRValidationError("Slave file escapes downloaded repository")
             return direct
+        if "/" in relative:
+            raise SlaveFileNotFoundError(f"{parent.name}: slave relative path not found: {filename}; resolved to {direct}")
         if self.index is None:
             self.index = {}
             roots = set()

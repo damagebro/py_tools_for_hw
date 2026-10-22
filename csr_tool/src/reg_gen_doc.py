@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from dataclasses import replace
 from pathlib import Path
 from typing import Iterable
 
@@ -236,6 +237,7 @@ class DocGenerator:
             path: tuple[str, ...],
             allocated_size: int,
             section_parts: tuple[int, ...],
+            memory_leaf: bool = False,
         ) -> None:
             current_path = path + (module.name,)
             section_number = ".".join(str(item) for item in section_parts)
@@ -248,13 +250,24 @@ class DocGenerator:
                     section_number,
                 )
             )
-            for child_index, child in enumerate(module.sub_modules, start=1):
+            if memory_leaf:
+                return
+            children = [(child.module_obj, child.offset, child.bytesize, False)
+                        for child in module.sub_modules]
+            # Document-only leaves: do not add memories to the parsed module graph.
+            for reg in module.registers:
+                if reg.reg_type == "mem":
+                    leaf = ModuleModel(name=f"{reg.name} (mem)", source_path=module.source_path,
+                                       registers=[replace(reg, offset=0)])
+                    children.append((leaf, reg.offset, reg.special.bytesize or 0, True))
+            for child_index, (child_module, offset, size, is_memory) in enumerate(sorted(children, key=lambda child: child[1]), start=1):
                 visit(
-                    child.module_obj,
-                    absolute_base + child.offset,
+                    child_module,
+                    absolute_base + offset,
                     current_path,
-                    child.bytesize,
+                    size,
                     section_parts + (child_index,),
+                    is_memory,
                 )
 
         root_size = self.module.base_info.system_bytesize or self.module.local_size

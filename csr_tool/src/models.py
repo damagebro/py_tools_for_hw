@@ -142,7 +142,7 @@ class ModuleModel:
 
     @staticmethod
     def clean_name(path: str) -> str:
-        stem = Path(path).stem.lower()
+        stem = Path(path.replace("\\", "/")).stem.lower()
         for suffix in ("_register", "_reg"):
             if stem.endswith(suffix):
                 return stem[: -len(suffix)]
