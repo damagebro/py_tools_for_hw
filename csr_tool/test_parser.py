@@ -587,6 +587,9 @@ class ParserTests(unittest.TestCase):
                 encoding="utf-8"
             )
             self.assertIn('class="register-table"', page)
+            self.assertIn('<th class="meta-label">SW_access</th><td class="meta-value">', page)
+            self.assertIn('<th class="meta-label">special</th><td class="meta-value" colspan="3">', page)
+            self.assertNotIn('<th class="meta-label">SW_access</th><td class="meta-value" colspan="3">', page)
             for heading in (
                 "reg_name",
                 "address",
