@@ -26,6 +26,7 @@ python -B /abs/path/to/git_repo_mgr/src/git_repo_mgr.py
 | --------------------------------------------------- | --------------------------------------------- |
 | `<git_repo_mgr> template`                           | 创建 `git_deps.toml`的模板                    |
 | `<git_repo_mgr> sync [--shallow]`                   | 递归同步 `git_deps.toml`                      |
+| `<git_repo_mgr> sync --ref <tag-or-branch>`         | 按同名分支或 tag 递归同步，保留独立子树版本   |
 | `<git_repo_mgr> sync --flat git_deps_flat.toml`     | 按固定 commit 快照恢复 workspace              |
 | `<git_repo_mgr> status`                             | 显示分支、提交、状态汇总及 dirty/missing 明细 |
 | `<git_repo_mgr> graph --format tree or json`        | 查看保存的依赖 tree 或机器可读图              |
@@ -47,6 +48,37 @@ python -B /abs/path/to/git_repo_mgr/src/git_repo_mgr.py
 ```
 
 `switch` 和 `tag` 会先检查全部 checkout 是否 dirty。`tag --push` 在本地全部创建成功后逐仓库推送；Git 不提供多仓库原子提交。
+
+## 使用场景
+
+| 编号 | 用法                   | 命令                         | 典型场景                                              |
+| ---- | ---------------------- | ---------------------------- | ----------------------------------------------------- |
+| 1    | Tree 依赖              | `sync`                       | 按各仓库的依赖清单递归同步，适合 IP 开发和 SoC 集成。 |
+| 2    | Flat 快照              | `sync --flat <快照文件>`     | 按快照中的 commit 恢复固定版本，适合问题复现。        |
+| 3    | 统一版本同步           | `sync --ref <tag-or-branch>` | 发版时统一打 tag，回归时按同一个发布 tag 同步依赖。   |
+| 4    | 多仓库批量管理         | `switch`、`tag`、`forall`    | 对已有 checkout 批量切换分支、打 tag 或执行命令。     |
+| 5    | 子树版本边界           | `subtree_ref = true` + `sync` | 为 DUT 子树单独指定版本，适合 TB 和 DUT 独立发版。    |
+
+### 统一发布版本与回归
+
+发版时用 `tag v1.0.0` 为参与发版的仓库打上同名 tag。回归时，在对应发布版本的根仓库中执行 `sync --ref v1.0.0`，递归读取各依赖仓库在该 tag 下的清单。联调时也可指定同名分支，如 `sync --ref soc_dev`。CLI 指定的 ref 优先于普通依赖声明和 `force_ref`，根仓库继续使用当前清单。任一依赖缺少指定版本时，同步报错。
+
+### TB 与 DUT 独立发版
+
+TB 可以持续在 `tb_dev` 联调，DUT 则使用统一发布的 `v1.0.0`。在 TB 对 DUT 顶层仓库的依赖条目中声明版本边界：
+
+```toml
+[[dependency]]
+repository = "https://example.com/team/dut_top.git"
+ref = "v1.0.0"
+subtree_ref = true
+```
+
+- DUT 顶层及其子依赖继承 `v1.0.0`，优先于外层的 `sync --ref tb_dev`。子树可嵌套，仓库使用最近的版本边界。
+- TB workspace 的 `switch`、`tag`、`forall` 跳过受保护子树。显式把受保护仓库传给 `forall` 时会报错。DUT 团队可在独立的 DUT workspace 中操作自己的仓库。
+- `graph --format tree` 和 `status` 显示受保护的仓库及其生效 ref。
+- TB 与 DUT 共享同一仓库时，有效 ref 不同则报冲突。有效 ref 相同且任一引用来自受保护子树时，该 checkout 也跳过批量操作。
+- Flat 快照包含子树中的全部仓库及其 commit，沿用现有格式。恢复时按 commit 拉取，批量操作按 Flat 工作区的现有规则执行。`sync --ref` 与 `sync --flat` 互斥。
 
 ## 依赖声明
 

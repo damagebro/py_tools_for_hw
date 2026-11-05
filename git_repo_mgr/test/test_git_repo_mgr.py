@@ -101,6 +101,78 @@ class GitRepoMgrTest(unittest.TestCase):
             f"ref = {json.dumps(ref)}\n"
         )
 
+    def test_uniform_sync_and_nested_subtree_protection(self) -> None:
+        old = self.create_repo("old")
+        shared = self.create_repo("shared")
+        vendor = self.create_repo("vendor", self.dependency(shared))
+        dut = self.create_repo("dut", self.dependency(old))
+        tb = self.create_repo("tb", self.dependency(old))
+        self.git(["tag", "vendor-v2"], shared)
+        self.git(["tag", "vendor-v2"], vendor)
+        (dut / mgr.MANIFEST_NAME).write_text(
+            self.dependency(vendor, "vendor-v2") + "subtree_ref = true\n", encoding="utf-8",
+        )
+        self.git(["commit", "-am", "DUT release manifest"], dut)
+        self.git(["tag", "dut-v1"], dut)
+        self.git(["switch", "-c", "tb-dev"], tb)
+        (tb / mgr.MANIFEST_NAME).write_text(
+            self.dependency(vendor, "vendor-v2") + "subtree_ref = true\n", encoding="utf-8",
+        )
+        self.git(["commit", "-am", "TB development manifest"], tb)
+        self.git(["switch", "main"], tb)
+        top = self.prepare_top(
+            self.dependency(tb) + "force_ref = true\n"
+            + self.dependency(dut, "dut-v1") + "subtree_ref = true\n",
+        )
+        root_commit = self.git(["rev-parse", "HEAD"], top)
+        workspace = ["--workspace", str(top)]
+        code, _, err = self.invoke(["sync", "--ref", "missing-ref", *workspace])
+        self.assertNotEqual(code, 0)
+        self.assertIn("E_REF_NOT_FOUND", err)
+        self.assertFalse((top / "import" / "tb").exists())
+        code, _, err = self.invoke(["sync", "--ref", "tb-dev", *workspace])
+        self.assertEqual(code, 0, err)
+        state = mgr.load_resolved(top)
+        self.assertEqual(self.git(["rev-parse", "HEAD"], top), root_commit)
+        self.assertEqual(
+            {item["name"]: item["ref"] for item in state["repositories"]},
+            {"tb": "tb-dev", "dut": "dut-v1", "vendor": "vendor-v2", "shared": "vendor-v2"},
+        )
+        self.assertEqual(
+            {item["name"] for item in state["repositories"] if item.get("subtree_protected")},
+            {"dut", "vendor", "shared"},
+        )
+        for command in (["switch", "main"], ["tag", "test"], ["forall", "-c", "git status"]):
+            code, out, err = self.invoke([*command, *workspace, "--dry-run"])
+            self.assertEqual(code, 0, err)
+            self.assertIn("[plan] tb", out)
+            for protected in ("dut", "vendor", "shared"):
+                self.assertNotIn(f"[plan] {protected}", out)
+        code, _, err = self.invoke(["forall", "-c", "git status", "shared", *workspace])
+        self.assertNotEqual(code, 0)
+        self.assertIn("E_SUBTREE_PROTECTED", err)
+        flat = top / ".git_repo" / "snapshot.toml"
+        code, _, err = self.invoke(["export-flat", "-o", str(flat), *workspace])
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("subtree_protected", flat.read_text(encoding="utf-8"))
+        code, _, err = self.invoke(["sync", "--flat", str(flat), *workspace])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(mgr.state_entries(top, mgr.load_resolved(top))), 5)
+
+    def test_shared_checkout_revisits_descendants_under_subtree_policy(self) -> None:
+        leaf = self.create_repo("leaf")
+        shared = self.create_repo("shared", self.dependency(leaf))
+        self.git(["tag", "v1"], shared)
+        self.git(["tag", "v1"], leaf)
+        top = self.prepare_top(
+            self.dependency(shared, "v1") + self.dependency(shared, "v1") + "subtree_ref = true\n",
+        )
+        code, _, err = self.invoke(["sync", "-w", str(top)])
+        self.assertNotEqual(code, 0)
+        self.assertIn("E_REF_CONFLICT", err)
+        self.assertIn("effective: main", err)
+        self.assertIn("effective: v1", err)
+
     def test_force_ref_selects_forced_dependency_tree(self) -> None:
         old = self.create_repo("old")
         new = self.create_repo("new")

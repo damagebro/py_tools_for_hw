@@ -55,6 +55,7 @@ class Dependency:
     ref: str
     local_path: str = ""
     force_ref: bool = False
+    subtree_ref: bool = False
 
 
 @dataclass(frozen=True)
@@ -75,6 +76,7 @@ class RepositoryNode:
     root: bool = False
     local_path: str = ""
     force_ref: bool = False
+    subtree_protected: bool = False
     requests: list[Request] = field(default_factory=list)
 
 
@@ -258,7 +260,11 @@ def parse_dependencies(data: dict[str, Any], path: Path) -> tuple[Dependency, ..
         force_ref = item.get("force_ref", False)
         if not isinstance(local_path, str) or not isinstance(force_ref, bool):
             raise RepoMgrError("E_MANIFEST", f"local_path must be a string and force_ref a boolean: {path}")
-        result.append(Dependency(resolve_repository(item, remotes, path), ref.strip(), local_path.strip(), force_ref))
+        subtree_ref = item.get("subtree_ref", False)
+        if not isinstance(subtree_ref, bool):
+            raise RepoMgrError("E_MANIFEST", f"subtree_ref must be a boolean: {path}")
+        result.append(Dependency(resolve_repository(item, remotes, path), ref.strip(),
+                                 local_path.strip(), force_ref, subtree_ref))
     return tuple(result)
 
 
@@ -370,7 +376,7 @@ def checkout_commit(path: Path, commit: str) -> str:
 
 
 def resolve_ref(path: Path, ref: str) -> str:
-    fetch_result = run_git(["fetch", "origin", ref], path)
+    fetch_result = run_git(["fetch", "--", "origin", ref], path)
     if fetch_result.returncode == 0:
         result = run_git(["rev-parse", "--verify", "FETCH_HEAD^{commit}"], path)
         if result.returncode == 0:
@@ -386,7 +392,7 @@ def remote_manifest(repository: str, ref: str) -> tuple[str, dict[str, Any]]:
     with tempfile.TemporaryDirectory(prefix="git_repo_manifest_") as directory:
         cache = Path(directory)
         git_output(["init", "--bare"], cache)
-        git_output(["fetch", "--depth", "1", repository, ref], cache)
+        git_output(["fetch", "--depth", "1", "--", repository, ref], cache)
         commit = git_output(["rev-parse", "FETCH_HEAD^{commit}"], cache)
         if not git_output(["ls-tree", "--name-only", commit, "--", MANIFEST_NAME], cache):
             return commit, {}
@@ -425,15 +431,21 @@ def materialize_repository(path: Path, repository: str, ref: str, shallow: bool)
         clone_args = ["clone", "--no-checkout"]
         if shallow:
             clone_args.extend(("--depth", "1"))
-        clone_args.extend((repository, str(path)))
-        result = run_git(clone_args, path.parent)
-        if result.returncode != 0:
-            detail = (result.stderr or result.stdout).strip()
-            raise RepoMgrError(
-                "E_CLONE",
-                f"failed to clone repository: {repository}",
-                (detail,) if detail else (),
-            )
+        # Publish a new checkout only after its requested ref has resolved.
+        with tempfile.TemporaryDirectory(prefix=".git_repo_clone_", dir=path.parent) as directory:
+            staging = Path(directory) / path.name
+            clone_args.extend(("--", repository, str(staging)))
+            result = run_git(clone_args, path.parent)
+            if result.returncode != 0:
+                detail = (result.stderr or result.stdout).strip()
+                raise RepoMgrError(
+                    "E_CLONE",
+                    f"failed to clone repository: {repository}",
+                    (detail,) if detail else (),
+                )
+            commit = checkout_commit(staging, resolve_ref(staging, ref))
+            staging.rename(path)
+            return commit
 
     commit = resolve_ref(path, ref)
     return checkout_commit(path, commit)
@@ -452,13 +464,16 @@ def relative_checkout(top: Path, path: Path) -> str:
 
 
 class WorkspaceResolver:
-    def __init__(self, top: Path, shallow: bool) -> None:
+    def __init__(self, top: Path, shallow: bool, uniform_ref: str | None = None) -> None:
         self.top = workspace_directory(top)
         self.top_is_git = is_git_root(self.top)
         self.shallow = shallow
+        self.uniform_ref = uniform_ref
         self.nodes: dict[str, RepositoryNode] = {}
         self.node_order: list[str] = []
-        self.edges: list[tuple[str, str]] = []
+        self.edges: dict[tuple[str, str], None] = {}
+        self.manifests: dict[str, dict[str, Any]] = {}
+        self.expanded: set[tuple[str, str | None]] = set()
         self.checkout_names: dict[str, str] = {}
         self.root_key = ""
         self.overrides: dict[str, str] = {}
@@ -472,7 +487,7 @@ class WorkspaceResolver:
         # Collect all top-level overrides before walking any indirect dependency.
         for dep in parse_dependencies(top_manifest, top_manifest_path):
             key = normalize_repository(dep.repository)
-            if dep.force_ref:
+            if dep.force_ref and self.uniform_ref is None:
                 if key in self.forced_refs and self.forced_refs[key] != dep.ref:
                     raise RepoMgrError("E_REF_CONFLICT", f"conflicting force_ref declarations: {dep.repository}")
                 self.forced_refs[key] = dep.ref
@@ -515,10 +530,12 @@ class WorkspaceResolver:
         manifest: dict[str, Any],
         stack: tuple[str, ...],
         chain: tuple[str, ...],
+        inherited_ref: str | None = None,
     ) -> None:
         for dependency in parse_dependencies(manifest, parent.path / MANIFEST_NAME):
             key = normalize_repository(dependency.repository)
-            effective_ref = self.forced_refs.get(key, dependency.ref)
+            subtree_ref = dependency.ref if dependency.subtree_ref else inherited_ref
+            effective_ref = subtree_ref or self.uniform_ref or self.forced_refs.get(key, dependency.ref)
             existing = self.nodes.get(key)
             target_name = existing.name if existing is not None else self._checkout_name(key, dependency.repository)
             request_chain = (*chain, target_name)
@@ -546,13 +563,13 @@ class WorkspaceResolver:
                         (
                             f"repository: {dependency.repository}",
                             "conflicting requests:",
-                            f"  {' -> '.join(previous.chain)}  ref: {previous.ref}",
-                            f"  {' -> '.join(request_chain)}  ref: {dependency.ref}",
+                            f"  {' -> '.join(previous.chain)}  ref: {previous.ref} (effective: {existing.ref})",
+                            f"  {' -> '.join(request_chain)}  ref: {dependency.ref} (effective: {effective_ref})",
                             "resolution: align the ref values in the relevant git_deps.toml files",
                         ),
                     )
                 existing.requests.append(Request(dependency.ref, request_chain))
-                self.edges.append((parent.key, existing.key))
+                self._expand(parent, existing, stack, request_chain, subtree_ref)
                 continue
 
             checkout = self._checkout_name(key, dependency.repository)
@@ -580,14 +597,31 @@ class WorkspaceResolver:
                 checkout=relative_checkout(self.top, path),
                 path=path,
                 local_path=str(local) if local is not None else "",
-                force_ref=key in self.forced_refs,
+                force_ref=subtree_ref is None and key in self.forced_refs,
                 requests=[Request(dependency.ref, request_chain)],
             )
             self.nodes[key] = node
             self.node_order.append(key)
             self.checkout_names[checkout] = key
-            self.edges.append((parent.key, key))
-            self._walk(node, child_manifest, (*stack, key), request_chain)
+            self.manifests[key] = child_manifest
+            self._expand(parent, node, stack, request_chain, subtree_ref)
+
+    def _expand(
+        self,
+        parent: RepositoryNode,
+        node: RepositoryNode,
+        stack: tuple[str, ...],
+        chain: tuple[str, ...],
+        subtree_ref: str | None,
+    ) -> None:
+        self.edges[parent.key, node.key] = None
+        if subtree_ref is not None:
+            node.subtree_protected = True
+        # A shared checkout can inherit a different ref policy on another path.
+        context = (node.key, subtree_ref)
+        if context not in self.expanded:
+            self.expanded.add(context)
+            self._walk(node, self.manifests[node.key], (*stack, node.key), chain, subtree_ref)
 
     def _check_link(self, path: Path, target: Path) -> None:
         if path.parent.resolve() != path.parent.absolute():
@@ -642,6 +676,8 @@ class WorkspaceResolver:
                     suffix += f" [force_ref: requested={','.join(dict.fromkeys(r.ref for r in node.requests))} -> {node.ref}]"
                 if node.local_path:
                     suffix += f" [local_path: {node.local_path}]"
+                if node.subtree_protected:
+                    suffix += f" [subtree: {node.ref}]"
                 lines.append(f"{prefix}{connector}{node.name}{suffix}")
                 if not shared:
                     visited.add(child)
@@ -666,6 +702,7 @@ class WorkspaceResolver:
                     "checkout": node.checkout,
                     "local_path": node.local_path,
                     "force_ref": node.force_ref,
+                    "subtree_protected": node.subtree_protected,
                     "requested_refs": list(dict.fromkeys(r.ref for r in node.requests)),
                 }
             )
@@ -694,6 +731,7 @@ class WorkspaceResolver:
                     "root": self.nodes[key].root,
                     "local_path": self.nodes[key].local_path,
                     "force_ref": self.nodes[key].force_ref,
+                    "subtree_protected": self.nodes[key].subtree_protected,
                     "requests": [{"ref": r.ref, "chain": list(r.chain)} for r in self.nodes[key].requests],
                 }
                 for key in self.node_order
@@ -705,7 +743,7 @@ class WorkspaceResolver:
         }
 
 
-def state_to_toml(state: dict[str, Any]) -> str:
+def state_to_toml(state: dict[str, Any], *, include_subtree_protection: bool = False) -> str:
     workspace = state["workspace"]
     lines = [
         "[workspace]",
@@ -728,9 +766,11 @@ def state_to_toml(state: dict[str, Any]) -> str:
                 f"local_path = {toml_string(repository.get('local_path', ''))}",
                 f"force_ref = {str(repository.get('force_ref', False)).lower()}",
                 f"requested_refs = {json.dumps(repository.get('requested_refs', []))}",
-                "",
             )
         )
+        if include_subtree_protection and repository.get("subtree_protected"):
+            lines.append("subtree_protected = true")
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -738,7 +778,9 @@ def write_workspace_state(top: Path, resolver: WorkspaceResolver) -> None:
     output_dir = state_dir(top)
     output_dir.mkdir(parents=True, exist_ok=True)
     state = resolver.state()
-    (output_dir / RESOLVED_NAME).write_text(state_to_toml(state), encoding="utf-8")
+    (output_dir / RESOLVED_NAME).write_text(
+        state_to_toml(state, include_subtree_protection=True), encoding="utf-8",
+    )
     (output_dir / GRAPH_NAME).write_text(
         json.dumps(resolver.graph(), indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
@@ -762,13 +804,16 @@ def load_resolved(top: Path) -> dict[str, Any]:
         required = ("name", "repository", "ref", "commit", "checkout")
         if any(not isinstance(item.get(key), str) for key in required):
             raise RepoMgrError("E_RESOLVED", f"invalid repository entry: {path}")
+        if not isinstance(item.get("subtree_protected", False), bool):
+            raise RepoMgrError("E_RESOLVED", f"subtree_protected must be a boolean: {path}")
     return {"workspace": workspace, "repositories": repositories}
 
 
 def state_entries(top: Path, state: dict[str, Any]) -> list[tuple[str, Path]]:
-    reject_linked_operations(top, state)
+    repositories = [item for item in state["repositories"] if not item.get("subtree_protected")]
+    reject_linked_operations(top, {"repositories": repositories})
     entries = [(str(state["workspace"]["top_name"]), top)] if state_top_is_git(top, state["workspace"]) else []
-    for item in state["repositories"]:
+    for item in repositories:
         checkout = Path(str(item["checkout"]))
         if checkout.is_absolute() or ".." in checkout.parts:
             raise RepoMgrError("E_RESOLVED", f"invalid checkout path in resolved state: {checkout}")
@@ -801,6 +846,7 @@ def state_records(top: Path, state: dict[str, Any]) -> list[dict[str, str | Path
                 "path": (top / str(item["checkout"])).resolve(),
                 "local_path": item.get("local_path", ""),
                 "force_ref": item.get("force_ref", False),
+                "subtree_protected": item.get("subtree_protected", False),
                 "requested_refs": item.get("requested_refs", []),
             }
         )
@@ -841,8 +887,12 @@ def command_template(output_arg: str) -> int:
     return 0
 
 
-def command_sync(workspace_root_arg: str, shallow: bool) -> int:
-    resolver = WorkspaceResolver(Path(workspace_root_arg).resolve(), shallow)
+def command_sync(workspace_root_arg: str, shallow: bool, ref: str | None = None) -> int:
+    if ref is not None:
+        ref = ref.strip()
+        if not ref or ref.startswith("-"):
+            raise RepoMgrError("E_REF_NOT_FOUND", "sync --ref requires a branch or tag")
+    resolver = WorkspaceResolver(Path(workspace_root_arg).resolve(), shallow, ref)
     resolver.resolve()
     write_workspace_state(resolver.top, resolver)
     print(f"synced {len(resolver.node_order) - 1} imported repository(s)")
@@ -922,6 +972,8 @@ def command_status(workspace_root_arg: str) -> int:
                 extra = [exc.message]
         if record.get("force_ref"):
             extra.append(f"force_ref: requested={','.join(record.get('requested_refs', []))} -> {record['ref']}")
+        if record.get("subtree_protected"):
+            extra.append(f"Subtree protected: {record['ref']}")
         if record.get("local_path"):
             extra.append(f"local_path: {record['local_path']}")
             extra.append(f"Integration ref: {record['ref']} {record['commit']} (source HEAD shown above)")
@@ -970,7 +1022,11 @@ def command_forall(
             (f"available: {', '.join(record_map)}",),
         )
     selected = set(projects)
-    targets = [record for record in records if not selected or record["name"] in selected]
+    for name in projects:
+        if record_map[name].get("subtree_protected"):
+            raise RepoMgrError("E_SUBTREE_PROTECTED", f"project belongs to a protected subtree: {name}")
+    targets = [record for record in records if not record.get("subtree_protected")
+               and (not selected or record["name"] in selected)]
     reject_linked_operations(top, {"repositories": targets})
     failures = 0
 
@@ -1578,7 +1634,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
     sync_parser = subparsers.add_parser("sync", help="recursively sync git_deps.toml")
     sync_parser.add_argument("--workspace", "-w", dest="workspace_root", help="explicit workspace; otherwise find unique ancestor state or manifest")
-    sync_parser.add_argument("--flat", help="restore a generated git_deps_flat.toml snapshot")
+    sync_mode = sync_parser.add_mutually_exclusive_group()
+    sync_mode.add_argument("--flat", help="restore a generated git_deps_flat.toml snapshot")
+    sync_mode.add_argument("--ref", help="sync dependencies at a common branch or tag outside protected subtrees")
     sync_parser.add_argument("--shallow", action="store_true", help="use depth-1 clone for new checkouts")
 
     status_parser = subparsers.add_parser("status", help="show resolved checkout status")
@@ -1691,7 +1749,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "sync":
             if args.flat:
                 return command_sync_flat(args.workspace_root, args.flat, args.shallow)
-            return command_sync(args.workspace_root, args.shallow)
+            return command_sync(args.workspace_root, args.shallow, args.ref)
         if args.command == "status":
             return command_status(args.workspace_root)
         if args.command == "forall":
