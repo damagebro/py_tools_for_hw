@@ -101,6 +101,35 @@ class GitRepoMgrTest(unittest.TestCase):
             f"ref = {json.dumps(ref)}\n"
         )
 
+    def test_tag_branch_only_targets_synced_branch_checkouts(self) -> None:
+        common = self.create_repo("common_ip")
+        self.git(["tag", "-a", "stable", "-m", "stable"], common)
+        dma = self.create_repo("dma")
+        dma_commit = self.git(["rev-parse", "HEAD"], dma)
+        cpu = self.create_repo("cpu", self.dependency(common, "stable"))
+        top = self.prepare_top(self.dependency(common, "stable")
+                               + self.dependency(cpu) + self.dependency(dma, dma_commit))
+        workspace = ["-w", str(top)]
+        code, _, err = self.invoke(["sync", *workspace])
+        self.assertEqual(code, 0, err)
+        (top / "import" / "dma" / "untracked.txt").touch()
+        args = ["tag", "release-v1", "--branch-only", "--push", *workspace]
+        code, output, err = self.invoke([*args, "--dry-run"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("[plan] top:", output)
+        self.assertIn("[plan] cpu:", output)
+        self.assertIn("[skip] common_ip: fixed tag", output)
+        self.assertIn("[skip] dma: fixed commit", output)
+        self.assertNotIn("release-v1", self.git(["tag", "--list"], cpu))
+        code, _, err = self.invoke(args)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.git(["rev-parse", "release-v1^{commit}"], cpu),
+                         self.git(["rev-parse", "HEAD"], top / "import" / "cpu"))
+        self.assertIn("release-v1", self.git(["tag", "--list"], top))
+        for remote in (common, dma):
+            self.assertNotIn("release-v1", self.git(["tag", "--list"], remote))
+            self.assertNotIn("release-v1", self.git(["tag", "--list"], top / "import" / remote.name))
+
     def test_uniform_sync_and_nested_subtree_protection(self) -> None:
         old = self.create_repo("old")
         shared = self.create_repo("shared")

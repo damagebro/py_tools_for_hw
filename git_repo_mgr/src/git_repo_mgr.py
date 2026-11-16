@@ -743,7 +743,7 @@ class WorkspaceResolver:
         }
 
 
-def state_to_toml(state: dict[str, Any], *, include_subtree_protection: bool = False) -> str:
+def state_to_toml(state: dict[str, Any], *, tree_state: bool = False) -> str:
     workspace = state["workspace"]
     lines = [
         "[workspace]",
@@ -752,8 +752,10 @@ def state_to_toml(state: dict[str, Any], *, include_subtree_protection: bool = F
         f"top_repository = {toml_string(workspace['top_repository'])}",
         f"top_commit = {toml_string(workspace['top_commit'])}",
         f"top_is_git = {str(workspace.get('top_is_git', bool(workspace['top_repository']))).lower()}",
-        "",
     ]
+    if tree_state:
+        lines.append('sync_mode = "tree"')
+    lines.append("")
     for repository in state["repositories"]:
         lines.extend(
             (
@@ -768,7 +770,7 @@ def state_to_toml(state: dict[str, Any], *, include_subtree_protection: bool = F
                 f"requested_refs = {json.dumps(repository.get('requested_refs', []))}",
             )
         )
-        if include_subtree_protection and repository.get("subtree_protected"):
+        if tree_state and repository.get("subtree_protected"):
             lines.append("subtree_protected = true")
         lines.append("")
     return "\n".join(lines)
@@ -779,7 +781,7 @@ def write_workspace_state(top: Path, resolver: WorkspaceResolver) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     state = resolver.state()
     (output_dir / RESOLVED_NAME).write_text(
-        state_to_toml(state, include_subtree_protection=True), encoding="utf-8",
+        state_to_toml(state, tree_state=True), encoding="utf-8",
     )
     (output_dir / GRAPH_NAME).write_text(
         json.dumps(resolver.graph(), indent=2, ensure_ascii=False) + "\n",
@@ -1108,23 +1110,66 @@ def command_switch(workspace_root_arg: str, ref: str, dry_run: bool) -> int:
     return 0
 
 
-def command_tag(workspace_root_arg: str, tag: str, message: str | None, push: bool, dry_run: bool) -> int:
+def release_ref_kind(top: Path, item: dict[str, Any]) -> str:
+    ref = item["ref"]
+    if re.fullmatch(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", ref) and ref.lower() == item["commit"]:
+        return "commit"
+    if ref.startswith("refs/tags/"):
+        return "tag"
+    if ref.startswith("refs/heads/"):
+        return "branch"
+    branch, tag = f"refs/heads/{ref}", f"refs/tags/{ref}"
+    remote = git_output(["ls-remote", "--refs", "--", item["repository"], branch, tag], top)
+    matches = {line.split("\t", 1)[1] for line in remote.splitlines() if "\t" in line}
+    if matches & {branch, tag} == {branch, tag}:
+        raise RepoMgrError("E_REF_KIND", f"{item['name']}: ref '{ref}' matches a branch and a tag",
+                           ("use refs/heads/ or refs/tags/ in the manifest and run sync again",))
+    if branch in matches:
+        return "branch"
+    if tag in matches:
+        return "tag"
+    raise RepoMgrError("E_REF_KIND", f"{item['name']}: cannot classify ref '{ref}'; check the manifest and run sync again")
+
+
+def command_tag(workspace_root_arg: str, tag: str, message: str | None, push: bool,
+                dry_run: bool, branch_only: bool = False) -> int:
     top = workspace_directory(Path(workspace_root_arg).resolve())
     state = load_resolved(top)
+    commits: dict[Path, str] = {}
+    if branch_only:
+        if state["workspace"].get("sync_mode") != "tree":
+            raise RepoMgrError("E_TAG_SCOPE", "tag --branch-only requires current Tree sync state; run sync first")
+        selected = []
+        for item in state["repositories"]:
+            if item.get("subtree_protected"):
+                print(f"[skip] {item['name']}: protected subtree")
+                continue
+            kind = release_ref_kind(top, item)
+            if kind != "branch":
+                print(f"[skip] {item['name']}: fixed {kind} {item['ref']}")
+                continue
+            selected.append(item)
+        state = {**state, "repositories": selected}
+        commits = {(top / item["checkout"]).resolve(): item["commit"] for item in selected}
+        commits[top] = state["workspace"]["top_commit"]
     entries = state_entries(top, state)
     for name, path in entries:
         if not path.is_dir():
             raise RepoMgrError("E_CHECKOUT_MISSING", f"checkout is missing: {name}: {path}")
         if is_top_dirty(path) if path == top else is_dirty(path):
             raise RepoMgrError("E_DIRTY", f"refusing to tag dirty checkout: {name}: {path}")
+        if branch_only and repository_commit(path) != commits[path]:
+            raise RepoMgrError("E_TAG_HEAD", f"{name}: HEAD differs from synced commit {commits[path]}; run sync first")
         if git_success(["rev-parse", "--verify", "--quiet", f"refs/tags/{tag}"], path):
             raise RepoMgrError("E_TAG_EXISTS", f"tag already exists: {name}: {tag}")
     annotation = message or f"git_repo_mgr workspace tag {tag}"
     for name, path in entries:
         if dry_run:
-            print(f"[plan] {name}: tag {tag}")
+            target = f" at {commits[path]}" if branch_only else ""
+            print(f"[plan] {name}: tag {tag}{target}")
         else:
-            git_output(["tag", "-a", tag, "-m", annotation], path)
+            target = [commits[path]] if branch_only else []
+            git_output(["tag", "-a", "-m", annotation, "--", tag, *target], path)
             print(f"[ok] {name}: tagged {tag}")
     if push and not dry_run:
         for name, path in entries:
@@ -1674,6 +1719,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     tag_parser.add_argument("-m", "--message", help="annotated tag message")
     tag_parser.add_argument("--push", action="store_true", help="push tags after local creation")
     tag_parser.add_argument("--dry-run", action="store_true", help="show planned changes only")
+    tag_parser.add_argument("--branch-only", action="store_true", help="tag the workspace root and branch dependencies from Tree sync")
 
     admin_parser = subparsers.add_parser("admin", help="run provider-backed integration authority commands")
     admin_subparsers = admin_parser.add_subparsers(dest="admin_command", required=True)
@@ -1767,7 +1813,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "switch":
             return command_switch(args.workspace_root, args.ref, args.dry_run)
         if args.command == "tag":
-            return command_tag(args.workspace_root, args.name, args.message, args.push, args.dry_run)
+            return command_tag(args.workspace_root, args.name, args.message, args.push, args.dry_run, args.branch_only)
         if args.command == "admin":
             if args.admin_command == "policy-status":
                 return command_admin_policy_status(args.workspace_root, args.config)

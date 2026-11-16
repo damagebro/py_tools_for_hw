@@ -33,6 +33,7 @@ python -B /abs/path/to/git_repo_mgr/src/git_repo_mgr.py
 | `<git_repo_mgr> export-flat -o git_deps_flat.toml`  | 导出可复现的 flat 快照                        |
 | `<git_repo_mgr> switch <branch or tag or commit>`   | 统一切换全部 checkout                         |
 | `<git_repo_mgr> tag <name> [-m <message>] [--push]` | 在全部 checkout 创建并可选推送 annotated tag  |
+| `<git_repo_mgr> tag <name> --branch-only`           | 只给顶层 Git 仓库和通过分支引入的依赖打 tag  |
 | `<git_repo_mgr> forall -c "<shell command>"`        | 在全部 checkout 中执行 shell 命令             |
 | `<git_repo_mgr> admin <command>`                    | 查询或修改远端 main 分支保护与发版状态        |
 
