@@ -473,7 +473,7 @@ class WorkspaceResolver:
         self.node_order: list[str] = []
         self.edges: dict[tuple[str, str], None] = {}
         self.manifests: dict[str, dict[str, Any]] = {}
-        self.expanded: set[tuple[str, str | None]] = set()
+        self.expanded: set[tuple[str, bool]] = set()
         self.checkout_names: dict[str, str] = {}
         self.root_key = ""
         self.overrides: dict[str, str] = {}
@@ -530,12 +530,14 @@ class WorkspaceResolver:
         manifest: dict[str, Any],
         stack: tuple[str, ...],
         chain: tuple[str, ...],
-        inherited_ref: str | None = None,
+        inside_subtree: bool = False,
     ) -> None:
         for dependency in parse_dependencies(manifest, parent.path / MANIFEST_NAME):
             key = normalize_repository(dependency.repository)
-            subtree_ref = dependency.ref if dependency.subtree_ref else inherited_ref
-            effective_ref = subtree_ref or self.uniform_ref or self.forced_refs.get(key, dependency.ref)
+            inside_boundary = inside_subtree or dependency.subtree_ref
+            effective_ref = dependency.ref
+            if not inside_boundary:
+                effective_ref = self.uniform_ref or self.forced_refs.get(key, dependency.ref)
             existing = self.nodes.get(key)
             target_name = existing.name if existing is not None else self._checkout_name(key, dependency.repository)
             request_chain = (*chain, target_name)
@@ -569,7 +571,7 @@ class WorkspaceResolver:
                         ),
                     )
                 existing.requests.append(Request(dependency.ref, request_chain))
-                self._expand(parent, existing, stack, request_chain, subtree_ref)
+                self._expand(parent, existing, stack, request_chain, inside_boundary)
                 continue
 
             checkout = self._checkout_name(key, dependency.repository)
@@ -597,14 +599,14 @@ class WorkspaceResolver:
                 checkout=relative_checkout(self.top, path),
                 path=path,
                 local_path=str(local) if local is not None else "",
-                force_ref=subtree_ref is None and key in self.forced_refs,
+                force_ref=not inside_boundary and key in self.forced_refs,
                 requests=[Request(dependency.ref, request_chain)],
             )
             self.nodes[key] = node
             self.node_order.append(key)
             self.checkout_names[checkout] = key
             self.manifests[key] = child_manifest
-            self._expand(parent, node, stack, request_chain, subtree_ref)
+            self._expand(parent, node, stack, request_chain, inside_boundary)
 
     def _expand(
         self,
@@ -612,16 +614,16 @@ class WorkspaceResolver:
         node: RepositoryNode,
         stack: tuple[str, ...],
         chain: tuple[str, ...],
-        subtree_ref: str | None,
+        inside_subtree: bool,
     ) -> None:
         self.edges[parent.key, node.key] = None
-        if subtree_ref is not None:
+        if inside_subtree:
             node.subtree_protected = True
         # A shared checkout can inherit a different ref policy on another path.
-        context = (node.key, subtree_ref)
+        context = (node.key, inside_subtree)
         if context not in self.expanded:
             self.expanded.add(context)
-            self._walk(node, self.manifests[node.key], (*stack, node.key), chain, subtree_ref)
+            self._walk(node, self.manifests[node.key], (*stack, node.key), chain, inside_subtree)
 
     def _check_link(self, path: Path, target: Path) -> None:
         if path.parent.resolve() != path.parent.absolute():

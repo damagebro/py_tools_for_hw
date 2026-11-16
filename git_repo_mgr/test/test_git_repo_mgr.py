@@ -136,7 +136,6 @@ class GitRepoMgrTest(unittest.TestCase):
         vendor = self.create_repo("vendor", self.dependency(shared))
         dut = self.create_repo("dut", self.dependency(old))
         tb = self.create_repo("tb", self.dependency(old))
-        self.git(["tag", "vendor-v2"], shared)
         self.git(["tag", "vendor-v2"], vendor)
         (dut / mgr.MANIFEST_NAME).write_text(
             self.dependency(vendor, "vendor-v2") + "subtree_ref = true\n", encoding="utf-8",
@@ -165,7 +164,7 @@ class GitRepoMgrTest(unittest.TestCase):
         self.assertEqual(self.git(["rev-parse", "HEAD"], top), root_commit)
         self.assertEqual(
             {item["name"]: item["ref"] for item in state["repositories"]},
-            {"tb": "tb-dev", "dut": "dut-v1", "vendor": "vendor-v2", "shared": "vendor-v2"},
+            {"tb": "tb-dev", "dut": "dut-v1", "vendor": "vendor-v2", "shared": "main"},
         )
         self.assertEqual(
             {item["name"] for item in state["repositories"] if item.get("subtree_protected")},
@@ -194,7 +193,8 @@ class GitRepoMgrTest(unittest.TestCase):
         self.git(["tag", "v1"], shared)
         self.git(["tag", "v1"], leaf)
         top = self.prepare_top(
-            self.dependency(shared, "v1") + self.dependency(shared, "v1") + "subtree_ref = true\n",
+            self.dependency(shared, "v1") + self.dependency(shared, "v1") + "subtree_ref = true\n"
+            + self.dependency(leaf, "v1") + "force_ref = true\n",
         )
         code, _, err = self.invoke(["sync", "-w", str(top)])
         self.assertNotEqual(code, 0)
