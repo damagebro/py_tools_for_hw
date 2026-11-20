@@ -2,13 +2,21 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 
 from .models import ModuleModel, RegisterModel
 from .reg_common import CSRValidationError, hex_width, write_text
 
 
-InstanceNode = tuple[ModuleModel, int, tuple[str, ...], int, str]
+@dataclass
+class InstanceNode:
+    module: ModuleModel
+    path: tuple[str, ...]
+    size: int
+    parent_index: int | None
+    instance_name: str
+    unique_name: str
 
 
 def generate_firmware(
@@ -130,14 +138,26 @@ def _address_header(module: ModuleModel, prefix: str, filename: str, *, addresse
 
     if addresses:
         lines.append("// Absolute address map")
-    for block, base, path, size, unique in (_instance_nodes(module) if addresses else []):
-        block_tag = f"{prefix}_{unique}".upper()
-        lines.append(f"// {'/'.join(path)}")
-        end_addr = base + max(1, size) - 1
+    instances = _instance_nodes(module) if addresses else []
+    tags = [f"{prefix}_{node.unique_name}".upper() for node in instances]
+    for node, block_tag in zip(instances, tags):
+        block = node.module
+        lines.append(f"// {'/'.join(node.path)}")
+        if node.parent_index is None:
+            system_addr = f"{block_tag}_SYSTEM_ADDR"
+            lines.extend([
+                f"#ifndef {system_addr}",
+                *_define_lines([(system_addr, _c_hex(module.base_info.system_baseaddr, 32))]),
+                "#endif",
+            ])
+            base_addr = f"({system_addr} + {_c_hex(0, 32)})"
+        else:
+            parent_tag = tags[node.parent_index]
+            base_addr = f"{parent_tag}_{node.instance_name.upper()}_SLV_ADDR"
         defines = [
-            (f"{block_tag}_BASE_ADDR", f"0x{base:08X}U"),
-            (f"{block_tag}_SIZE", _c_hex(size, 32)),
-            (f"{block_tag}_END_ADDR", _c_hex(end_addr, 32)),
+            (f"{block_tag}_BASE_ADDR", base_addr),
+            (f"{block_tag}_SIZE", _c_hex(node.size, 32)),
+            (f"{block_tag}_END_ADDR", f"({block_tag}_BASE_ADDR + {block_tag}_SIZE - 1U)"),
         ]
         for reg in block.registers:
             if reg.reg_type in {"slave", "mem"}:
@@ -158,6 +178,13 @@ def _address_header(module: ModuleModel, prefix: str, filename: str, *, addresse
                         f"{block.name.upper()}_{reg_tag.upper()}_DEFAULT",
                     )
                 )
+        slave_offsets = {reg.name: reg.offset for reg in block.registers if reg.reg_type == "slave"}
+        slave_offsets.update((child.instance_name, child.offset) for child in block.sub_modules)
+        for instance_name, offset in slave_offsets.items():
+            defines.append((
+                f"{block_tag}_{instance_name.upper()}_SLV_ADDR",
+                f"({block_tag}_BASE_ADDR + {_c_hex(offset, 32)})",
+            ))
         lines.extend(_define_lines(defines))
         lines.append("")
     lines.extend([f"#endif // {guard}"])
@@ -332,35 +359,38 @@ def _register_union(
 
 
 def _instance_nodes(module: ModuleModel) -> list[InstanceNode]:
-    raw_nodes: list[tuple[ModuleModel, int, tuple[str, ...], int]] = []
+    nodes: list[InstanceNode] = []
 
     def visit(
         item: ModuleModel,
-        absolute_base: int,
         path: tuple[str, ...],
         allocated_size: int,
+        parent_index: int | None,
+        instance_name: str,
     ) -> None:
         current_path = path + (item.name,)
-        raw_nodes.append((item, absolute_base, current_path, allocated_size))
+        index = len(nodes)
+        nodes.append(InstanceNode(
+            item, current_path, allocated_size, parent_index, instance_name, item.name,
+        ))
         for child in item.sub_modules:
             visit(
                 child.module_obj,
-                absolute_base + child.offset,
                 current_path,
                 child.bytesize,
+                index,
+                child.instance_name,
             )
 
     root_size = module.base_info.system_bytesize or module.local_size
-    visit(module, module.base_info.system_baseaddr, (), root_size)
-    name_counts = Counter(item.name for item, _, _, _ in raw_nodes)
+    visit(module, (), root_size, None, "")
+    name_counts = Counter(node.module.name for node in nodes)
     name_indexes: defaultdict[str, int] = defaultdict(int)
-    nodes: list[InstanceNode] = []
-    for item, base, path, size in raw_nodes:
-        name_indexes[item.name] += 1
-        unique_name = item.name
-        if name_counts[item.name] > 1:
-            unique_name = f"{item.name}_u{name_indexes[item.name]}"
-        nodes.append((item, base, path, size, unique_name))
+    for node in nodes:
+        name = node.module.name
+        name_indexes[name] += 1
+        if name_counts[name] > 1:
+            node.unique_name = f"{name}_u{name_indexes[name]}"
     return nodes
 
 

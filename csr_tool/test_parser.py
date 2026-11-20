@@ -767,20 +767,31 @@ class ParserTests(unittest.TestCase):
                 self.fail(f"missing macro {name}")
 
             assert_define("NPU_TOP_TOP_VER_DEFAULT", "TOP_TOP_VER_DEFAULT")
+            self.assertIn("#ifndef NPU_TOP_SYSTEM_ADDR", addr)
+            assert_define("NPU_TOP_SYSTEM_ADDR", "0xF0000000U")
+            assert_define("NPU_TOP_BASE_ADDR", "(NPU_TOP_SYSTEM_ADDR + 0x00000000U)")
             assert_define("NPU_TOP_SIZE", "0x00010000U")
-            assert_define("NPU_TOP_END_ADDR", "0xF000FFFFU")
+            assert_define("NPU_TOP_END_ADDR", "(NPU_TOP_BASE_ADDR + NPU_TOP_SIZE - 1U)")
+            assert_define("NPU_TOP_MID_A_SLV_ADDR", "(NPU_TOP_BASE_ADDR + 0x00001000U)")
+            assert_define("NPU_TOP_MID_B_SLV_ADDR", "(NPU_TOP_BASE_ADDR + 0x00002000U)")
+            assert_define("NPU_MID_A_BASE_ADDR", "NPU_TOP_MID_A_SLV_ADDR")
+            assert_define("NPU_MID_B_BASE_ADDR", "NPU_TOP_MID_B_SLV_ADDR")
+            assert_define("NPU_MID_A_LEAF_A2_SLV_ADDR", "(NPU_MID_A_BASE_ADDR + 0x00000200U)")
+            assert_define("NPU_MID_B_B_SLV_SLV_ADDR", "(NPU_MID_B_BASE_ADDR + 0x00000100U)")
+            assert_define("NPU_LEAF_A2_U1_BASE_ADDR", "NPU_MID_A_LEAF_A2_SLV_ADDR")
+            assert_define("NPU_LEAF_A2_U2_BASE_ADDR", "NPU_MID_B_B_SLV_SLV_ADDR")
             assert_define(
                 "NPU_LEAF_A2_U1_CONFIG_DEFAULT",
                 "LEAF_A2_CONFIG_DEFAULT",
             )
             assert_define("NPU_LEAF_A2_U1_SIZE", "0x00000100U")
-            assert_define("NPU_LEAF_A2_U1_END_ADDR", "0xF00012FFU")
+            assert_define("NPU_LEAF_A2_U1_END_ADDR", "(NPU_LEAF_A2_U1_BASE_ADDR + NPU_LEAF_A2_U1_SIZE - 1U)")
             assert_define(
                 "NPU_LEAF_A2_U2_CONFIG_DEFAULT",
                 "LEAF_A2_CONFIG_DEFAULT",
             )
             assert_define("NPU_LEAF_A2_U2_SIZE", "0x000000C0U")
-            assert_define("NPU_LEAF_A2_U2_END_ADDR", "0xF00021BFU")
+            assert_define("NPU_LEAF_A2_U2_END_ADDR", "(NPU_LEAF_A2_U2_BASE_ADDR + NPU_LEAF_A2_U2_SIZE - 1U)")
             top_defines = [
                 line for line in addr.splitlines()
                 if line.startswith("#define TOP_") and " 0x" in line
@@ -792,15 +803,11 @@ class ParserTests(unittest.TestCase):
             npu_top_defines = [
                 line for line in addr.splitlines()
                 if line.startswith("#define NPU_TOP_")
+                and not line.startswith("#define NPU_TOP_SYSTEM_ADDR ")
             ]
             self.assertEqual(
                 1,
-                len({
-                    line.index("0x")
-                    if " 0x" in line else line.index("(")
-                    if " (" in line else line.rindex(" ") + 1
-                    for line in npu_top_defines
-                }),
+                len({len(line) - len(line.split(None, 2)[2]) for line in npu_top_defines}),
             )
 
             types = (firmware_dir / "top_all_reg_type.h").read_text(
