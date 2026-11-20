@@ -11,6 +11,7 @@
 3. subsys 基地址或占用范围变化时，同步更新 `soc_top.xlsx` 和 SoC 集成入口。
 4. 公共 block 变化时，检查并更新所有引用方，统一交付匹配的 common 定义。
 5. CSR 文档交付只保留 SoC 入口、各 subsys 根节点的 `*_tree.html` 及必要资源，不拷贝内部 block 的独立文档；固件交付保留所需 subsys 头文件及其引用的公共定义。
+6. 硬件同时交付 PG（Program Guide）中的 PHAL sequence 伪代码，软件据此实现初始化与操作流程；寄存器定义或操作时序变化时同步更新 PG。
 
 ## 固定示例
 
@@ -137,6 +138,144 @@ SoC 集成入口的具体文件名和存放位置后续确定，不能改变 sub
 
 - SoC 只生成本层需要的寄存器、地址分发逻辑及对应 TB。
 - 下级 subsys 的 RTL/TB 使用各自已经交付的文件，不重复生成或覆盖。
+
+## PHAL Sequence 与 PG 交付
+
+PHAL 在此表示项目级的软硬件访问适配层。生成的 FW 头文件负责地址、类型、默认值和字段宏；硬件通过 PG 定义寄存器初始化与操作序列，软件实现访问后端及正式驱动。下面仅约定接口与 sequence 伪代码，不增加 PHAL 源码自动生成。
+
+### PG 编写与交付
+
+- PHAL sequence 由硬件编写，保存在项目或 subsys 维护的 PG（Program Guide）文档的 `PHAL Sequence` 章节中，作为软硬件交接内容。
+- PG 是人工维护的设计文档，纳入项目版本管理，不放进会被工具重新生成的 `out/` 目录，也不只保存在寄存器表格或生成头文件的注释中。
+- sequence 使用生成的 struct、union 和 `.bits` 位域描述字段，通过 `set_reg/get_reg` 读写 `.word`，不固化 MCU/Host 的绝对地址。掩码接口作为底层可选工具，不作为 PG sequence 的主要表达方式。
+- 每个 sequence 写明适用模块、前置条件、参数、操作顺序、等待条件、超时及失败处理；涉及电源、时钟、复位或其他模块的依赖也需明确。
+- 软件以 PG 为依据实现和维护正式驱动，并适配各编译环境的地址视图、访问后端及并发控制。PG 中的伪代码不是直接交付的通用驱动源码。
+- PG 随对应版本的 FW 头文件和寄存器文档一起交付。PG 说明“如何操作”，寄存器文档说明“每个寄存器是什么”，两者互相引用，不重复维护整套寄存器定义。
+
+### 访问接口
+
+MCU 与 Host 使用相同接口，但分别实现访问后端。`set_reg` 表示整字写入，不表示只置位某些 bit；`get_reg` 表示整字读取。
+
+```cpp
+#include <stdint.h>
+
+// 平台实现: 地址使用当前编译环境的 SYSTEM_ADDR 视图。
+uint32_t phal_read32(uintptr_t addr);
+void phal_write32(uintptr_t addr, uint32_t value);
+
+static inline uint32_t get_reg(uintptr_t addr)
+{
+    return phal_read32(addr);
+}
+
+static inline void set_reg(uintptr_t addr, uint32_t value)
+{
+    phal_write32(addr, value);
+}
+
+// 仅适用于整字均可安全读改写的普通 RW 配置寄存器。
+// value 已经移位到对应字段，mask 之外的 bit 保持原值。
+static inline void update_reg(uintptr_t addr, uint32_t mask, uint32_t value)
+{
+    uint32_t current = get_reg(addr);
+    set_reg(addr, (current & ~mask) | (value & mask));
+}
+
+// 平台提供有超时的轮询: (get_reg(addr) & mask) == (expected & mask)。
+// 返回 0 表示满足条件，负值表示超时或访问失败，禁止无限等待。
+int wait_reg(uintptr_t addr, uint32_t mask, uint32_t expected, uint32_t timeout_us);
+```
+
+- MCU 后端使用平台提供的 MMIO 访问方式；Host 后端可使用映射后的设备窗口或驱动接口，不能直接把设备总线地址当作进程指针解引用。
+- 地址转换、32-bit 对齐、字节序、设备内存属性和必要的访问屏障由平台后端处理。普通 `volatile` 访问不能替代这些平台约束。
+- `update_reg` 不是原子操作。同一寄存器存在多线程、中断或多 master 访问时，由驱动提供互斥与所有权管理；软件锁不能阻止硬件自行更新字段。
+- Host 访问失败应由后端显式上报，不能用返回 `0` 冒充成功读取。本例省略平台错误传递的具体实现。
+
+### 常用初始化序列
+
+初始化 sequence 由硬件在 PG 中编写，软件按其实现驱动，不能只根据寄存器表格的排列顺序自动推断。
+
+```text
+准备电源、时钟、复位和 Host 地址映射
+    -> 确认设备可访问，必要时读取 ID/version
+    -> 关闭目标功能
+    -> 写配置，保持使能为 0
+    -> 对允许回读的配置检查写入结果
+    -> 按 W1C 规则清除历史中断状态
+    -> 配置中断屏蔽并使能功能（若硬件提供相应寄存器）
+    -> 按需写启动命令，并有超时地等待完成或就绪
+```
+
+下面使用现有 top/mid/leaf 示例中的 `leaf_a2`，展示可写入 PG 的 sequence 伪代码，演示 mode 配置、使能和 W1C 清除。示例假设时钟、复位已准备完成，且 `config` 可以安全读改写和回读；实际项目的复位、启动、等待条件需由硬件在对应 PG 中明确。
+
+```cpp
+// PG 中的 sequence 伪代码，软件按平台要求实现为正式驱动。
+// 根地址由 MCU/Host 编译环境提前定义，也可沿用表格中的默认值。
+#include "top_all_reg_addr.h"
+#include "top_all_reg_type.h"
+
+int npu_leaf_a2_init(uint32_t mode)
+{
+    const uintptr_t config_addr = NPU_LEAF_A2_U1_CONFIG_ADDR;
+    leaf_a2_block_reg_ts regs;
+    leaf_a2_config_tu current;
+    leaf_a2_config_tu readback;
+
+    // 仅初始化本地 struct，不会访问硬件。
+    leaf_a2_block_reg_set_default(&regs);
+    regs.config.bits.mode = mode;
+    regs.config.bits.en = 0U;
+
+    // 位域赋值可能截断，写硬件前检查参数是否可完整表示。
+    if (regs.config.bits.mode != mode) {
+        return -1;
+    }
+
+    // 普通 RW 配置可安全读改写，先关闭功能，保留其他当前配置。
+    current.word = get_reg(config_addr);
+    current.bits.en = 0U;
+    set_reg(config_addr, current.word);
+
+    // 按默认配置和目标 mode 写入，保持 en=0。
+    set_reg(config_addr, regs.config.word);
+
+    // 普通 RW 配置允许回读检查；失败时保持关闭，不继续启动。
+    readback.word = get_reg(config_addr);
+    if (readback.bits.mode != regs.config.bits.mode || readback.bits.en != 0U) {
+        return -2;
+    }
+
+    // W1C 从零组字，仅将需要清除的位设为 1，不读改写。
+    regs.int_sts.word = 0U;
+    regs.int_sts.bits.err = 1U;
+    set_reg(NPU_LEAF_A2_U1_INT_STS_ADDR, regs.int_sts.word);
+
+    regs.config.bits.en = 1U;
+    set_reg(config_addr, regs.config.word);
+    return 0;
+}
+
+// top_ctrl.start 是 W1T 命令，系统其他初始化完成后按需调用。
+void npu_start(void)
+{
+    top_top_ctrl_tu command;
+    command.word = 0U;
+    command.bits.start = 1U;
+    set_reg(NPU_TOP_TOP_CTRL_ADDR, command.word);
+}
+```
+
+struct/union 只作为本地组字与解码对象，不把整个 block struct 直接映射为 MMIO 布局，也不整体写回。实际访问始终使用对应寄存器的 `*_ADDR` 和 `.word`，避免访问 RO、W1C 或命令寄存器时产生副作用。位域与 `.word` 的映射依赖编译器 ABI 和端序，软件需分别验证 MCU/Host 工具链中的布局。
+
+当前示例没有独立的 ready/done 寄存器，因此不虚构轮询地址。实际模块提供状态位后，再按其定义调用 `wait_reg`，超时返回上层处理。
+
+### 特殊寄存器约束
+
+- 普通 RW 配置可按字段掩码更新；完整写默认值仅用于明确允许的初始化场景，不能批量向所有寄存器写 DEFAULT。
+- RO 状态只读；有读清除或 FIFO 出队等副作用的寄存器，不用于无条件轮询和重复回读。
+- W1C 状态通过直接写 `1` 清除目标 bit，不读改写，避免误清其他已置位状态。
+- W1T 命令直接写触发掩码，不读改写，也不把命令寄存器当作普通存储配置回读校验。
+- shadow 配置的写入和提交顺序按具体模块协议执行，不能把多个阶段简化为一次 `update_reg`。
 
 ## 附录: 软件地址头文件（addr.h）
 
